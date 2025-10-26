@@ -1,0 +1,10 @@
+[package]
+name = "p-project-staking"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+p-project-core = { path = "../p-project-core" }
+p-project-contracts = { path = "../p-project-contracts" }
+serde.workspace = true
+tokio.workspace = true

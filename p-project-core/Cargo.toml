@@ -1,0 +1,17 @@
+[package]
+name = "p-project-core"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "p-project-core-test"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "mysql", "chrono"] }
+redis = { workspace = true, features = ["tokio-comp"] }
+mongodb = { workspace = true, features = ["tokio-runtime"] }
+futures-util = "0.3"

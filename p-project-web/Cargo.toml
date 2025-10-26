@@ -1,0 +1,18 @@
+[package]
+name = "p-project-web"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+p-project-core = { path = "../p-project-core" }
+p-project-contracts = { path = "../p-project-contracts" }
+serde.workspace = true
+tokio.workspace = true
+wasm-bindgen = { workspace = true, features = ["serde-serialize"] }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true }
+js-sys = "0.3"
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }

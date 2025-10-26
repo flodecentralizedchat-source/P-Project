@@ -1,0 +1,14 @@
+[package]
+name = "p-project-contracts"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "p-project-contracts-test"
+path = "src/main.rs"
+
+[dependencies]
+p-project-core = { path = "../p-project-core" }
+serde.workspace = true
+tokio.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
