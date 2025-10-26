@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: p_project_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: p_project
+      MYSQL_USER: pproject
+      MYSQL_PASSWORD: pprojectpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: p_project_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # MongoDB
+  mongodb:
+    image: mongo:6-jammy
+    container_name: p_project_mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
+  # P-Project API
+  api:
+    build: .
+    container_name: p_project_api
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=mysql://pproject:pprojectpassword@mysql:3306/p_project
+      - REDIS_URL=redis://redis:6379
+      - MONGODB_URL=mongodb://root:rootpassword@mongodb:27017
+    depends_on:
+      - mysql
+      - redis
+      - mongodb
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  mongodb_data:

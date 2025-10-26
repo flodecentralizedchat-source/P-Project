@@ -160,6 +160,14 @@ p-project/
 ├── src/main.rs             # Main application entry point
 ├── Cargo.toml              # Workspace configuration
 ├── README.md               # Project documentation
+├── CONTRIBUTING.md         # Contribution guidelines
+├── CODE_OF_CONDUCT.md      # Community guidelines
+├── LICENSE                 # MIT License
+├── .env.example            # Environment variables template
+├── .gitignore              # Git ignore rules
+├── .github/workflows/      # GitHub Actions workflows
+├── Dockerfile              # Docker container configuration
+├── docker-compose.yml      # Multi-container deployment
 ├── build.sh                # Build script for Unix systems
 └── build.ps1               # Build script for Windows
 ```
@@ -172,7 +180,7 @@ p-project/
 | --------------------- | ----------- | ------------------------------------------------------ |
 | Core Library          | ✅ Complete  | Models, utilities, database connectors                 |
 | Token Contracts       | ✅ Complete  | Transfer, burn, reward mechanisms                      |
-| Staking Contracts     | ✅ Complete  | Staking with time-based rewards                        |
+| Staking System        | ✅ Complete  | Staking with time-based rewards                        |
 | Airdrop System        | ✅ Complete  | Distribution to eligible users                         |
 | DAO Governance        | ✅ Complete  | Proposal creation and voting system                    |
 | Bridge Functionality  | ✅ Complete  | Cross-chain token transfer framework                   |
@@ -181,6 +189,8 @@ p-project/
 | Database Integration  | ✅ Complete  | MySQL, Redis, and MongoDB connectors                   |
 | Testing               | ✅ Complete  | Unit tests for core components and contracts           |
 | Documentation         | ✅ Complete  | Comprehensive README and code comments                 |
+| CI/CD Pipeline        | ✅ Complete  | GitHub Actions for automated testing and building      |
+| Docker Support        | ✅ Complete  | Containerized deployment with docker-compose           |
 
 ---
 
@@ -192,23 +202,27 @@ p-project/
 - MySQL, Redis, and MongoDB instances
 - wasm-pack for building WASM components
 
-### Building the Project
+### Quick Start
 
 ```bash
-# Build the entire workspace
-cargo build
+# Clone the repository
+git clone https://github.com/flodecentralizedchat-source/P-Project.git
+cd P-Project
 
-# Build WASM components
-wasm-pack build p-project-web --target web
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your database credentials
+
+# Build the project
+./build.sh  # On Unix systems
+# or
+.\build.ps1 # On Windows systems
 
 # Run the API server
 cargo run -p p-project-api
 
-# Run core component tests
-cargo run -p p-project-core
-
-# Run contract tests
-cargo run -p p-project-contracts
+# Or run with Docker
+docker-compose up
 ```
 
 ### Development
@@ -221,6 +235,12 @@ cargo test
 To check WASM build:
 ```bash
 wasm-pack test p-project-web --headless --firefox
+```
+
+To run code quality checks:
+```bash
+cargo clippy -- -D warnings
+cargo fmt -- --check
 ```
 
 ## 🎉 **15. Conclusion**

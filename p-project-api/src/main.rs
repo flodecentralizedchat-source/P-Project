@@ -16,8 +16,12 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize middleware
+    middleware::init_middleware();
+    
     // Initialize database
-    let db = MySqlDatabase::new("mysql://user:password@localhost/p_project").await?;
+    let db_url = std::env::var("DATABASE_URL").unwrap_or("mysql://user:password@localhost/p_project".to_string());
+    let db = MySqlDatabase::new(&db_url).await?;
     db.init_tables().await?;
     
     let app_state = AppState {
@@ -44,4 +48,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     Ok(())
 }
-

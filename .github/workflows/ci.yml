@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, clean-branch ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: p_project
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      mongodb:
+        image: mongo:6-jammy
+        ports:
+          - 27017:27017
+        options: --health-cmd="echo 'db.runCommand({ping: 1})' | mongosh --quiet" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
+    - name: Install wasm-pack
+      run: |
+        curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+    - name: Cache Cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build
+      run: |
+        cargo build --verbose
+        wasm-pack build p-project-web --target web
+
+    - name: Run tests
+      run: |
+        cargo test --verbose
+      env:
+        DATABASE_URL: mysql://root:rootpassword@localhost:3306/p_project
+        REDIS_URL: redis://localhost:6379
+        MONGODB_URL: mongodb://localhost:27017
+
+    - name: Run clippy
+      run: |
+        rustup component add clippy
+        cargo clippy -- -D warnings
+
+    - name: Check formatting
+      run: |
+        rustup component add rustfmt
+        cargo fmt -- --check
