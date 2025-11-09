@@ -1,34 +1,54 @@
-# Use Rust official image as base
-FROM rust:1.70 as builder
+# Builder stage: compile Rust backend and WASM frontend
+FROM rust:1.70 AS builder
 
-# Create app directory
 WORKDIR /app
 
-# Copy project files
+# Install tools needed to build WASM
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install wasm-pack --locked
+
+# Leverage Docker cache by copying manifests first
+COPY Cargo.toml Cargo.lock ./
+COPY p-project-core/Cargo.toml p-project-core/Cargo.toml
+COPY p-project-contracts/Cargo.toml p-project-contracts/Cargo.toml
+COPY p-project-api/Cargo.toml p-project-api/Cargo.toml
+COPY p-project-dao/Cargo.toml p-project-dao/Cargo.toml
+COPY p-project-staking/Cargo.toml p-project-staking/Cargo.toml
+COPY p-project-airdrop/Cargo.toml p-project-airdrop/Cargo.toml
+COPY p-project-bridge/Cargo.toml p-project-bridge/Cargo.toml
+COPY p-project-web/Cargo.toml p-project-web/Cargo.toml
+
+# Pre-fetch dependencies
+RUN cargo fetch
+
+# Copy full source
 COPY . .
 
-# Build the application
-RUN cargo build --release
+# Build the API in release mode
+RUN cargo build -p p-project-api --release
 
-# Use a minimal base image for the runtime
+# Build the WebAssembly package
+RUN wasm-pack build p-project-web --target web --out-dir pkg
+
+# Runtime stage: minimal image running as non-root
 FROM debian:bullseye-slim
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
 WORKDIR /app
 
-# Copy the binary from builder stage
-COPY --from=builder /app/target/release/p-project-api ./p-project-api
+# Create an unprivileged user
+RUN useradd -m -u 10001 appuser
 
-# Copy WebAssembly components
+# Copy binaries and assets from builder
+COPY --from=builder /app/target/release/p-project-api ./p-project-api
 COPY --from=builder /app/p-project-web/pkg ./pkg
 
-# Expose port
-EXPOSE 3000
+# Fix ownership and drop privileges
+RUN chown -R appuser:appuser /app
+USER appuser
 
-# Run the application
+EXPOSE 3000
 CMD ["./p-project-api"]
