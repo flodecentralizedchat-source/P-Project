@@ -28,7 +28,7 @@ pub struct EthereumAdapter {
     signer: Option<Arc<SignerMiddleware<Provider<Http>, LocalWallet>>>,
     bridge_address: Option<Address>,
     token_address: Option<Address>,
-    confirmations: u32,
+    _confirmations: u32,
 }
 
 impl EthereumAdapter {
@@ -47,7 +47,7 @@ impl EthereumAdapter {
                                 signer: None,
                                 bridge_address,
                                 token_address,
-                                confirmations: c.confirmations,
+                                _confirmations: c.confirmations,
                             }
                         }
                     };
@@ -60,7 +60,7 @@ impl EthereumAdapter {
                 signer,
                 bridge_address,
                 token_address,
-                confirmations: c.confirmations,
+                _confirmations: c.confirmations,
             };
         }
         Self {
@@ -68,7 +68,7 @@ impl EthereumAdapter {
             signer: None,
             bridge_address: None,
             token_address: None,
-            confirmations: 0,
+            _confirmations: 0,
         }
     }
 }

@@ -22,7 +22,9 @@ impl AirdropDbAdapter {
         })?;
 
         // Save to MySQL using the core database method
-        self.mysql.as_ref().save_airdrop_state(&airdrop_json)
+        self.mysql
+            .as_ref()
+            .save_airdrop_state(&airdrop_json)
             .await
             .map_err(|e| {
                 AirdropError::DatabaseError(format!("Failed to save airdrop state: {}", e))
@@ -34,7 +36,10 @@ impl AirdropDbAdapter {
     /// Load airdrop contract state from database
     pub async fn load_airdrop_state(&self) -> Result<Option<AirdropContract>, AirdropError> {
         // Load from MySQL using the core database method
-        let state_data = self.mysql.as_ref().load_latest_airdrop_state()
+        let state_data = self
+            .mysql
+            .as_ref()
+            .load_latest_airdrop_state()
             .await
             .map_err(|e| {
                 AirdropError::DatabaseError(format!("Failed to load airdrop state: {}", e))

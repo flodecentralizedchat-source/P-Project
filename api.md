@@ -77,6 +77,64 @@ Choose one of the following setups.
       -d '{"wallet_address":"0x1234567890abcdef1234567890abcdef12345678"}'
     ```
 
+- POST /transfer (move tokens between wallets)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/transfer \
+      -H 'Content-Type: application/json' \
+      -d '{"from_user_id":"<sender>","to_user_id":"<receiver>","amount":10.0}'
+    ```
+- POST /stake (lock tokens for a duration)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/stake \
+      -H 'Content-Type: application/json' \
+      -d '{"user_id":"<user>","amount":50.0,"duration_days":30}'
+    ```
+- POST /unstake (release a stake position)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/unstake \
+      -H 'Content-Type: application/json' \
+      -d '{"user_id":"<user>"}'
+    ```
+- POST /airdrop/claim
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/airdrop/claim \
+      -H 'Content-Type: application/json' \
+      -d '{"airdrop_id":"airdrop1","user_id":"<user>"}'
+    ```
+
+- POST /transfer (move tokens)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/transfer \
+      -H 'Content-Type: application/json' \
+      -d '{"from_user_id":"<sender>","to_user_id":"<receiver>","amount":10.0}'
+    ```
+- POST /stake (lock tokens for a duration)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/stake \
+      -H 'Content-Type: application/json' \
+      -d '{"user_id":"<user>","amount":50.0,"duration_days":30}'
+    ```
+- POST /unstake (release a stake by ID or use first active)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/unstake \
+      -H 'Content-Type: application/json' \
+      -d '{"user_id":"<user>"}'
+    ```
+- POST /airdrop/claim (claim allocation)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/airdrop/claim \
+      -H 'Content-Type: application/json' \
+      -d '{"airdrop_id":"airdrop1","user_id":"<user>"}'
+    ```
+
 Notes
 - Most endpoints currently return `501 Not Implemented` until business logic is wired in (see Endpoints section). `POST /users` is implemented and persists to MySQL.
 - Input validation: 400 if `username` is not 3-32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
@@ -152,24 +210,26 @@ Notes
       -d '{"wallet_address":"0x1234567890abcdef1234567890abcdef12345678"}'
     ```
 
-Notes
+- Notes
 - `/static` serves from a local `pkg/` directory. Unless you build the web crate to `pkg/` locally, requesting `/static/...` will return a 500. For API development only, you can ignore `/static`.
-- `POST /users` now inserts the user into the `users` table and returns the created record.
+- Transfer, staking, unstaking, and airdrop endpoints now persist through MySQL (see Error Responses for validation/duplicate handling).
 - Input validation: 400 if `username` is not 3-32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
 
 ---
 
 ## Endpoints (current state)
 
-- `GET /` - Health/info. Returns `"P-Project API Server"`.
-- `POST /users` - Create a user (implemented). Persists to MySQL and returns full user JSON with `created_at`.
-- `GET /users/:id` - Fetch a user. Returns 200 with user JSON or 404/`{ "error": "not_found" }`.
-- `PATCH /users/:id` - Update username and/or wallet. Validates input, persists changes, and returns the updated user JSON or a structured error.
-- `POST /transfer` - Token transfer (placeholder). Returns `501 Not Implemented`.
-- `POST /stake` - Stake tokens (placeholder). Returns `501 Not Implemented`.
-- `POST /unstake` - Unstake tokens (placeholder). Returns `501 Not Implemented`.
-- `POST /airdrop/claim` - Claim airdrop (placeholder). Returns `501 Not Implemented`.
-- `GET /static/*` - Serves files from `pkg/` (works in Docker build; local requires prebuilt `pkg/`).
+- `GET /` – Health/info. Returns `"P-Project API Server"`.
+- `POST /users` – Create a user (implemented). Persists to MySQL and returns full user JSON with `created_at`.
+- `GET /users/:id` – Fetch a user. Returns 200 with user JSON or 404/`{ "error": "not_found" }`.
+- `PATCH /users/:id` – Update username and/or wallet. Validates input, persists changes, and returns the updated user JSON or a structured error.
+- `POST /transfer` – Token transfer between users (validates amount, updates balances, records the transaction).
+- `POST /stake` – Stake tokens for a duration (moves funds from available to staked balance and records the staking entry).
+- `POST /unstake` – Release a staking position (reverses balances, marks the stake completed, logs the transaction).
+- `POST /airdrop/claim` – Claim an airdrop allocation (marks the recipient as claimed and returns the amount).
+- `POST /airdrop/create` – Register a new airdrop and its recipients, returns the new `airdrop_id`.
+- `POST /airdrop/batch-claim` – Claim airdrops for multiple users in one request, returns claimed amounts.
+- `GET /static/*` – Serves files from `pkg/` (works in Docker build; local requires prebuilt `pkg/`).
 
 Request examples
 - Create user
@@ -190,7 +250,34 @@ Responses
     "created_at": "2024-01-01T12:34:56"
   }
   ```
-- Placeholders return HTTP 501 until implemented.
+- Transfer response (example):
+  ```json
+  {
+    "transaction_id": "<uuid>",
+    "from_user_id": "<sender>",
+    "to_user_id": "<receiver>",
+    "amount": 10.0
+  }
+  ```
+- Stake response uses the `StakingInfo` shape (`start_time`, optional `end_time`, `rewards_earned`).
+- Airdrop claim:
+  ```json
+  {
+    "airdrop_id": "airdrop1",
+    "user_id": "<user>",
+    "amount": 100.0,
+    "message": "Airdrop claimed successfully"
+  }
+  ```
+- Batch claim:
+  ```json
+  {
+    "claimed": [
+      { "user_id": "alice", "amount": 50.0 },
+      { "user_id": "bob", "amount": 75.0 }
+    ]
+  }
+  ```
 
 ---
 

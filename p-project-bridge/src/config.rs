@@ -6,6 +6,7 @@ pub struct EthConfig {
     pub bridge_address: String,
     pub token_address: String,
     pub private_key_env: String,
+    #[allow(dead_code)]
     pub confirmations: u32,
 }
 
@@ -13,6 +14,7 @@ pub struct EthConfig {
 pub struct SolanaConfig {
     pub rpc_url: String,
     pub bridge_program: String,
+    #[allow(dead_code)]
     pub keypair_path_env: String,
     pub confirmations: u32,
 }
@@ -21,6 +23,7 @@ pub struct SolanaConfig {
 pub struct SuiConfig {
     pub rpc_url: String,
     pub bridge_package: String,
+    #[allow(dead_code)]
     pub key_env: String,
     pub confirmations: u32,
 }

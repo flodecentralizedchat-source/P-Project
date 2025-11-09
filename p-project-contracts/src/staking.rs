@@ -318,4 +318,9 @@ impl StakingContract {
         staking_info.is_compounding = true;
         Ok(())
     }
+
+    /// Check if emergency withdrawals are enabled
+    pub fn is_emergency_withdrawals_enabled(&self) -> bool {
+        self.emergency_withdrawals_enabled
+    }
 }

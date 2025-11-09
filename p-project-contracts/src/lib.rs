@@ -29,3 +29,24 @@ pub use token_db::TokenDbAdapter;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use db_adapters::DatabaseManager;
+
+#[cfg(test)]
+mod token_test;
+
+#[cfg(test)]
+mod staking_test;
+
+#[cfg(test)]
+mod airdrop_test;
+
+#[cfg(test)]
+mod db_integration_test;
+
+#[cfg(test)]
+mod error_tests;
+
+#[cfg(test)]
+mod serialization_tests;
+
+#[cfg(test)]
+mod full_integration_tests;

@@ -47,7 +47,8 @@ impl BridgeService {
     fn build_default_adapters(
         cfg: &BridgeConfig,
     ) -> HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>> {
-        let mut adapters: HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>> = HashMap::new();
+        let mut adapters: HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>> =
+            HashMap::new();
 
         let eth = EthereumAdapter::new(cfg.eth.as_ref());
         adapters.insert("Ethereum".to_string(), Box::new(eth));
@@ -66,7 +67,7 @@ impl BridgeService {
         &self.supported_chains
     }
 
-    pub fn relayer(&self) -> Relayer {
+    pub fn relayer(&self) -> Relayer<'_> {
         Relayer::new(&self.adapters, self.db.as_ref())
     }
 

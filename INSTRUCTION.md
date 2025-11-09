@@ -27,7 +27,12 @@ These steps cover the minimum environment, sequence, and commands to start the c
    ```bash
    cargo run -p p-project-bridge --bin relayer_demo
    ```
-2. This process polls `bridge_txs`, waits for Ethereum confirmations (via `ETH_RPC_URL`), and calls destination adapters to mint tokens. Logs show when locks are read and when a mint is performed (`[Relayer] ...`).
+2. Or use the helper script (`scripts/run-services.ps1`) to launch both the API and relayer together from separate PowerShell windows:
+   ```powershell
+   .\\scripts\\run-services.ps1
+   ```
+   The script powers up `p-project-api` and `p-project-bridge --bin relayer_demo` concurrently, so you can keep both services running side-by-side. Pass `-NoApi` or `-NoRelayer` to skip one process when needed.
+3. The relayer polls `bridge_txs`, waits for Ethereum confirmations (via `ETH_RPC_URL`), and calls destination adapters to mint tokens. Logs show when locks are read and when a mint is performed (`[Relayer] ...`).
 
 ## 4. Simulate without real chains (optional)
 Use this when you just want to confirm the logic:

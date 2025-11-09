@@ -18,6 +18,10 @@ impl DatabaseManager {
         redis: Arc<RedisCache>,
         mongodb: Arc<MongoDatabase>,
     ) -> Self {
-        Self { mysql, redis, mongodb }
+        Self {
+            mysql,
+            redis,
+            mongodb,
+        }
     }
 }

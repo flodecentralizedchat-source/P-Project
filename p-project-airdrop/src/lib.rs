@@ -1,5 +1,4 @@
-use chrono::{NaiveDateTime, Utc};
-use p_project_contracts::airdrop::AirdropContract;
+use p_project_contracts::airdrop::{AirdropContract, AirdropStatus};
 use p_project_core::database::MySqlDatabase;
 
 pub struct AirdropService {
@@ -54,7 +53,7 @@ impl AirdropService {
                 .map_err(|e| format!("Failed to add recipients to database: {}", e))?;
         }
 
-        result
+        result.map_err(|e| e.to_string())
     }
 
     /// Claim airdrop tokens
@@ -71,7 +70,7 @@ impl AirdropService {
                 .map_err(|e| format!("Failed to claim airdrop in database: {}", e))?;
         }
 
-        result
+        result.map_err(|e| e.to_string())
     }
 
     /// Batch claim airdrops for multiple users
@@ -91,7 +90,7 @@ impl AirdropService {
                 .map_err(|e| format!("Failed to batch claim airdrops in database: {}", e))?;
         }
 
-        result
+        result.map_err(|e| e.to_string())
     }
 
     /// Check if user has claimed their airdrop
@@ -114,12 +113,13 @@ impl AirdropService {
             .await
             .map_err(|e| format!("Failed to get airdrop status from database: {}", e))?;
 
-        Ok(p_project_contracts::airdrop::AirdropStatus {
+        Ok(AirdropStatus {
             airdrop_id: airdrop_id.to_string(),
             total_amount,
             distributed_amount,
             total_recipients,
             claimed_recipients,
+            is_paused: self.airdrop_contract.is_paused(),
         })
     }
 

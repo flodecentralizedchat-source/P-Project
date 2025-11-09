@@ -1,7 +1,5 @@
-use chrono::{NaiveDateTime, Utc};
-use p_project_airdrop::AirdropService;
+use chrono::Utc;
 use p_project_contracts::airdrop::{AirdropContract, MerkleTree};
-use p_project_core::database::MySqlDatabase;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -60,9 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
     let merkle_tree = MerkleTree::new(leaves);
 
-    if let Some(root) = merkle_tree.get_root() {
-        println!("Merkle tree root: {}", root);
-    }
+    println!("Merkle tree root: {}", merkle_tree.get_root());
 
     // Test proof generation
     if let Some(proof) = merkle_tree.get_proof(0) {

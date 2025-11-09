@@ -44,8 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(app_state);
 
     // Run server
-    let listener = TcpListener::bind("0.0.0.0:3001").await?;
-    println!("Server running on http://localhost:3001");
+    let listener = TcpListener::bind("0.0.0.0:3000").await?;
+    println!("Server running on http://localhost:3000");
 
     axum::serve(listener, app).await?;
 

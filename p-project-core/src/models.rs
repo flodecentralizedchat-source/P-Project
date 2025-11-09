@@ -1,11 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct User {
     pub id: String,
     pub username: String,
     pub wallet_address: String,
     pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TransactionType {
+    Transfer,
+    Burn,
+    Reward,
+    Staking,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,14 +24,6 @@ pub struct TokenTransaction {
     pub amount: f64,
     pub transaction_type: TransactionType,
     pub timestamp: chrono::NaiveDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TransactionType {
-    Transfer,
-    Burn,
-    Reward,
-    Staking,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

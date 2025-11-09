@@ -6,7 +6,9 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::Utc;
-use p_project_bridge::{AdapterTxStatus, BridgeService, BridgeStore, ChainAdapter, BoxedBridgeError};
+use p_project_bridge::{
+    AdapterTxStatus, BoxedBridgeError, BridgeService, BridgeStore, ChainAdapter,
+};
 use p_project_core::models::{BridgeTx, BridgeTxStatus};
 use p_project_core::utils;
 
@@ -72,7 +74,7 @@ impl BridgeStore for MockStore {
     }
 
     async fn set_bridge_src_tx(&self, id: &str, src_tx_hash: &str) -> Result<(), BoxedBridgeError> {
-        if let Some(mut tx) = self.inner.lock().unwrap().get_mut(id) {
+        if let Some(tx) = self.inner.lock().unwrap().get_mut(id) {
             tx.src_tx_hash = Some(src_tx_hash.to_string());
             tx.updated_at = MockStore::now();
         }
@@ -80,7 +82,7 @@ impl BridgeStore for MockStore {
     }
 
     async fn set_bridge_dst_tx(&self, id: &str, dst_tx_hash: &str) -> Result<(), BoxedBridgeError> {
-        if let Some(mut tx) = self.inner.lock().unwrap().get_mut(id) {
+        if let Some(tx) = self.inner.lock().unwrap().get_mut(id) {
             tx.dst_tx_hash = Some(dst_tx_hash.to_string());
             tx.updated_at = MockStore::now();
         }
@@ -88,7 +90,7 @@ impl BridgeStore for MockStore {
     }
 
     async fn set_bridge_lock_id(&self, id: &str, lock_id: &str) -> Result<(), BoxedBridgeError> {
-        if let Some(mut tx) = self.inner.lock().unwrap().get_mut(id) {
+        if let Some(tx) = self.inner.lock().unwrap().get_mut(id) {
             tx.lock_id = Some(lock_id.to_string());
             tx.updated_at = MockStore::now();
         }
@@ -101,7 +103,7 @@ impl BridgeStore for MockStore {
         status: &str,
         error_msg: Option<&str>,
     ) -> Result<(), BoxedBridgeError> {
-        if let Some(mut tx) = self.inner.lock().unwrap().get_mut(id) {
+        if let Some(tx) = self.inner.lock().unwrap().get_mut(id) {
             tx.status = MockStore::map_status(status);
             tx.error_msg = error_msg.map(|s| s.to_string());
             tx.updated_at = MockStore::now();
@@ -218,9 +220,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let relayer = service.relayer();
     relayer.run_once().await;
 
-    let record = store.get_bridge_tx(&tx_id).await?;
+    let record = store
+        .get_bridge_tx(&tx_id)
+        .await
+        .map_err(|e| e as Box<dyn Error>)?;
     println!(
-        "Bridge record after relayer: id={} status={:?} src={} dst={:?} lock_id={:?}",
+        "Bridge record after relayer: id={} status={:?} src={:?} dst={:?} lock_id={:?}",
         record.id, record.status, record.src_tx_hash, record.dst_tx_hash, record.lock_id
     );
 
