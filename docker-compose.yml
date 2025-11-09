@@ -14,6 +14,12 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -prootpassword || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # Redis Cache
@@ -22,6 +28,11 @@ services:
     container_name: p_project_redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # MongoDB
@@ -35,6 +46,12 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: rootpassword
     volumes:
       - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --username root --password rootpassword --eval 'db.adminCommand({ ping: 1 })' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # P-Project API
@@ -46,11 +63,14 @@ services:
     environment:
       - DATABASE_URL=mysql://pproject:pprojectpassword@mysql:3306/p_project
       - REDIS_URL=redis://redis:6379
-      - MONGODB_URL=mongodb://root:rootpassword@mongodb:27017
+      - MONGODB_URL=mongodb://root:rootpassword@mongodb:27017/?authSource=admin
     depends_on:
-      - mysql
-      - redis
-      - mongodb
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
