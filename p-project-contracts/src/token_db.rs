@@ -5,7 +5,6 @@ use p_project_core::database::MySqlDatabase;
 use p_project_core::models::TokenTransaction;
 use serde_json;
 use std::sync::Arc;
-use sqlx::Row;
 
 pub struct TokenDbAdapter {
     mysql: Arc<MySqlDatabase>,
@@ -22,10 +21,8 @@ impl TokenDbAdapter {
         let token_json = serde_json::to_string(token)
             .map_err(|e| TokenError::SerializationError(format!("Failed to serialize token: {}", e)))?;
 
-        // Save to MySQL
-        sqlx::query("INSERT INTO token_states (state_data) VALUES (?)")
-            .bind(token_json)
-            .execute(self.mysql.as_ref().get_pool())
+        // Save to MySQL using the core database method
+        self.mysql.as_ref().save_token_state(&token_json)
             .await
             .map_err(|e| TokenError::DatabaseError(format!("Failed to save token state: {}", e)))?;
 
@@ -34,13 +31,12 @@ impl TokenDbAdapter {
 
     /// Load token state from database
     pub async fn load_token_state(&self) -> Result<Option<PProjectToken>, TokenError> {
-        let row = sqlx::query("SELECT state_data FROM token_states ORDER BY created_at DESC LIMIT 1")
-            .fetch_optional(self.mysql.as_ref().get_pool())
+        // Load from MySQL using the core database method
+        let state_data = self.mysql.as_ref().load_latest_token_state()
             .await
             .map_err(|e| TokenError::DatabaseError(format!("Failed to load token state: {}", e)))?;
 
-        if let Some(row) = row {
-            let token_json: String = row.get("state_data");
+        if let Some(token_json) = state_data {
             let token: PProjectToken = serde_json::from_str(&token_json)
                 .map_err(|e| TokenError::SerializationError(format!("Failed to deserialize token: {}", e)))?;
             Ok(Some(token))

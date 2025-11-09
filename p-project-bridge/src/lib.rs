@@ -10,7 +10,6 @@ mod solana;
 mod store;
 mod sui;
 
-use adapter::ChainAdapter;
 pub use adapter::{AdapterTxStatus, ChainAdapter};
 use config::BridgeConfig;
 pub use error::BridgeError;
@@ -23,7 +22,7 @@ use sui::SuiAdapter;
 pub struct BridgeService {
     db: Arc<dyn BridgeStore + Send + Sync>,
     supported_chains: Vec<String>,
-    adapters: HashMap<String, Box<dyn ChainAdapter + Send + Sync>>,
+    adapters: HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>>,
 }
 
 impl BridgeService {
@@ -35,7 +34,7 @@ impl BridgeService {
 
     pub fn with_adapters(
         db: Arc<dyn BridgeStore + Send + Sync>,
-        adapters: HashMap<String, Box<dyn ChainAdapter + Send + Sync>>,
+        adapters: HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>>,
     ) -> Self {
         let supported_chains = adapters.keys().cloned().collect::<Vec<_>>();
         Self {
@@ -47,8 +46,8 @@ impl BridgeService {
 
     fn build_default_adapters(
         cfg: &BridgeConfig,
-    ) -> HashMap<String, Box<dyn ChainAdapter + Send + Sync>> {
-        let mut adapters: HashMap<String, Box<dyn ChainAdapter + Send + Sync>> = HashMap::new();
+    ) -> HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>> {
+        let mut adapters: HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>> = HashMap::new();
 
         let eth = EthereumAdapter::new(cfg.eth.as_ref());
         adapters.insert("Ethereum".to_string(), Box::new(eth));

@@ -22,10 +22,8 @@ impl StakingDbAdapter {
         let staking_json = serde_json::to_string(staking)
             .map_err(|e| StakingError::SerializationError(format!("Failed to serialize staking: {}", e)))?;
 
-        // Save to MySQL
-        sqlx::query("INSERT INTO staking_states (state_data) VALUES (?)")
-            .bind(staking_json)
-            .execute(self.mysql.as_ref().get_pool())
+        // Save to MySQL using the core database method
+        self.mysql.as_ref().save_staking_state(&staking_json)
             .await
             .map_err(|e| StakingError::DatabaseError(format!("Failed to save staking state: {}", e)))?;
 
@@ -34,13 +32,12 @@ impl StakingDbAdapter {
 
     /// Load staking contract state from database
     pub async fn load_staking_state(&self) -> Result<Option<StakingContract>, StakingError> {
-        let row = sqlx::query("SELECT state_data FROM staking_states ORDER BY created_at DESC LIMIT 1")
-            .fetch_optional(self.mysql.as_ref().get_pool())
+        // Load from MySQL using the core database method
+        let state_data = self.mysql.as_ref().load_latest_staking_state()
             .await
             .map_err(|e| StakingError::DatabaseError(format!("Failed to load staking state: {}", e)))?;
 
-        if let Some(row) = row {
-            let staking_json: String = row.get("state_data");
+        if let Some(staking_json) = state_data {
             let staking: StakingContract = serde_json::from_str(&staking_json)
                 .map_err(|e| StakingError::SerializationError(format!("Failed to deserialize staking: {}", e)))?;
             Ok(Some(staking))

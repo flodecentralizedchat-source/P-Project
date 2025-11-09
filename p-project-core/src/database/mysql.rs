@@ -136,6 +136,39 @@ impl MySqlDatabase {
         .execute(&self.pool)
         .await?;
 
+        // Create balances table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS balances (
+                user_id VARCHAR(255) PRIMARY KEY,
+                available_balance DECIMAL(18, 8) NOT NULL DEFAULT 0,
+                staked_balance DECIMAL(18, 8) NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create stakes table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS stakes (
+                id VARCHAR(255) PRIMARY KEY,
+                user_id VARCHAR(255) NOT NULL,
+                amount DECIMAL(18, 8) NOT NULL,
+                duration_days INT NOT NULL,
+                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                end_time TIMESTAMP NULL,
+                status VARCHAR(32) NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Create token_states table
         sqlx::query(
             r#"
@@ -370,12 +403,24 @@ impl MySqlDatabase {
         .await?;
 
         use crate::models::User;
+        self.ensure_balance_row(id).await?;
+
         Ok(User {
             id: row.get("id"),
             username: row.get("username"),
             wallet_address: row.get("wallet_address"),
             created_at: row.get("created_at"),
         })
+    }
+    
+    pub async fn ensure_balance_row(&self, user_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO balances (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id"
+        )
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
     
     pub async fn update_user(&self, id: &str, username: Option<&str>, wallet_address: Option<&str>) -> Result<Option<crate::models::User>, sqlx::Error> {
@@ -441,6 +486,22 @@ impl MySqlDatabase {
                 created_at: row.get("created_at"),
             };
             Ok(Some(user))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn get_balances(&self, user_id: &str) -> Result<Option<(f64, f64)>, sqlx::Error> {
+        if let Some(row) = sqlx::query(
+            "SELECT available_balance, staked_balance FROM balances WHERE user_id = ?"
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            let available: f64 = row.get("available_balance");
+            let staked: f64 = row.get("staked_balance");
+            Ok(Some((available, staked)))
         } else {
             Ok(None)
         }
@@ -582,5 +643,83 @@ impl MySqlDatabase {
             });
         }
         Ok(out)
+    }
+}
+
+// Token contract state operations
+impl MySqlDatabase {
+    /// Save token contract state to database
+    pub async fn save_token_state(&self, state_data: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO token_states (state_data) VALUES (?)")
+            .bind(state_data)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+    
+    /// Load latest token contract state from database
+    pub async fn load_latest_token_state(&self) -> Result<Option<String>, sqlx::Error> {
+        let row = sqlx::query("SELECT state_data FROM token_states ORDER BY created_at DESC LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await?;
+            
+        if let Some(row) = row {
+            let state_data: String = row.get("state_data");
+            Ok(Some(state_data))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+// Staking contract state operations
+impl MySqlDatabase {
+    /// Save staking contract state to database
+    pub async fn save_staking_state(&self, state_data: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO staking_states (state_data) VALUES (?)")
+            .bind(state_data)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+    
+    /// Load latest staking contract state from database
+    pub async fn load_latest_staking_state(&self) -> Result<Option<String>, sqlx::Error> {
+        let row = sqlx::query("SELECT state_data FROM staking_states ORDER BY created_at DESC LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await?;
+            
+        if let Some(row) = row {
+            let state_data: String = row.get("state_data");
+            Ok(Some(state_data))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+// Airdrop contract state operations
+impl MySqlDatabase {
+    /// Save airdrop contract state to database
+    pub async fn save_airdrop_state(&self, state_data: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO airdrop_states (state_data) VALUES (?)")
+            .bind(state_data)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+    
+    /// Load latest airdrop contract state from database
+    pub async fn load_latest_airdrop_state(&self) -> Result<Option<String>, sqlx::Error> {
+        let row = sqlx::query("SELECT state_data FROM airdrop_states ORDER BY created_at DESC LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await?;
+            
+        if let Some(row) = row {
+            let state_data: String = row.get("state_data");
+            Ok(Some(state_data))
+        } else {
+            Ok(None)
+        }
     }
 }
