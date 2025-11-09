@@ -66,10 +66,13 @@ jobs:
     - name: Run tests
       run: |
         cargo test --verbose
+        cargo test -p p-project-dao -- --ignored create_and_fetch_active_proposal_via_mongo
       env:
         DATABASE_URL: mysql://root:rootpassword@localhost:3306/p_project
         REDIS_URL: redis://localhost:6379
         MONGODB_URL: mongodb://localhost:27017
+        MONGO_URI: mongodb://localhost:27017
+        MONGO_DB: p_project_dao_test_ci
 
     - name: Run clippy
       run: |

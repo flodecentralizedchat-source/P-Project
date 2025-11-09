@@ -2,17 +2,17 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::adapter::ChainAdapter;
-use p_project_core::database::MySqlDatabase;
+use crate::store::BridgeStore;
 
 pub struct Relayer<'a> {
     adapters: &'a HashMap<String, Box<dyn ChainAdapter + Send + Sync>>,
-    db: &'a MySqlDatabase,
+    db: &'a (dyn BridgeStore + Send + Sync),
 }
 
 impl<'a> Relayer<'a> {
     pub fn new(
         adapters: &'a HashMap<String, Box<dyn ChainAdapter + Send + Sync>>,
-        db: &'a MySqlDatabase,
+        db: &'a (dyn BridgeStore + Send + Sync),
     ) -> Self {
         Self { adapters, db }
     }

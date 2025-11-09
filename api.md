@@ -65,9 +65,21 @@ Choose one of the following setups.
       -d '{"username":"alice","wallet_address":"0xabc"}'
     ```
 
+- PATCH update user (requires at least one field, returns updated user JSON)
+  - PowerShell:
+    ```powershell
+    Invoke-RestMethod -Method Patch -Uri http://localhost:3000/users/<user_id> -ContentType "application/json" -Body (@{ username="bob" } | ConvertTo-Json)
+    ```
+  - curl:
+    ```bash
+    curl -X PATCH http://localhost:3000/users/<user_id> \
+      -H 'Content-Type: application/json' \
+      -d '{"wallet_address":"0x1234567890abcdef1234567890abcdef12345678"}'
+    ```
+
 Notes
 - Most endpoints currently return `501 Not Implemented` until business logic is wired in (see Endpoints section). `POST /users` is implemented and persists to MySQL.
-- Input validation: 400 if `username` is not 3–32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
+- Input validation: 400 if `username` is not 3-32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
 - `/static` will be available because Docker builds the web crate and copies `pkg/` into the runtime image.
 
 5) Stop and clean up
@@ -128,23 +140,36 @@ Notes
       -d '{"username":"alice","wallet_address":"0xabc"}'
     ```
 
+- PATCH update user (requires at least one field, returns updated user JSON)
+  - PowerShell:
+    ```powershell
+    Invoke-RestMethod -Method Patch -Uri http://localhost:3000/users/<user_id> -ContentType "application/json" -Body (@{ username="bob" } | ConvertTo-Json)
+    ```
+  - curl:
+    ```bash
+    curl -X PATCH http://localhost:3000/users/<user_id> \
+      -H 'Content-Type: application/json' \
+      -d '{"wallet_address":"0x1234567890abcdef1234567890abcdef12345678"}'
+    ```
+
 Notes
 - `/static` serves from a local `pkg/` directory. Unless you build the web crate to `pkg/` locally, requesting `/static/...` will return a 500. For API development only, you can ignore `/static`.
 - `POST /users` now inserts the user into the `users` table and returns the created record.
-- Input validation: 400 if `username` is not 3–32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
+- Input validation: 400 if `username` is not 3-32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
 
 ---
 
 ## Endpoints (current state)
 
-- `GET /` – Health/info. Returns `"P-Project API Server"`.
-- `POST /users` – Create a user (implemented). Persists to MySQL and returns full user JSON with `created_at`.
-- `GET /users/:id` – Fetch a user (placeholder). Returns `501 Not Implemented`.
-- `POST /transfer` – Token transfer (placeholder). Returns `501 Not Implemented`.
-- `POST /stake` – Stake tokens (placeholder). Returns `501 Not Implemented`.
-- `POST /unstake` – Unstake tokens (placeholder). Returns `501 Not Implemented`.
-- `POST /airdrop/claim` – Claim airdrop (placeholder). Returns `501 Not Implemented`.
-- `GET /static/*` – Serves files from `pkg/` (works in Docker build; local requires prebuilt `pkg/`).
+- `GET /` - Health/info. Returns `"P-Project API Server"`.
+- `POST /users` - Create a user (implemented). Persists to MySQL and returns full user JSON with `created_at`.
+- `GET /users/:id` - Fetch a user. Returns 200 with user JSON or 404/`{ "error": "not_found" }`.
+- `PATCH /users/:id` - Update username and/or wallet. Validates input, persists changes, and returns the updated user JSON or a structured error.
+- `POST /transfer` - Token transfer (placeholder). Returns `501 Not Implemented`.
+- `POST /stake` - Stake tokens (placeholder). Returns `501 Not Implemented`.
+- `POST /unstake` - Unstake tokens (placeholder). Returns `501 Not Implemented`.
+- `POST /airdrop/claim` - Claim airdrop (placeholder). Returns `501 Not Implemented`.
+- `GET /static/*` - Serves files from `pkg/` (works in Docker build; local requires prebuilt `pkg/`).
 
 Request examples
 - Create user
@@ -232,6 +257,13 @@ This guide targets development usage. For production hardening, you’ll want to
 
 - GET `/users/:id`
   - Implemented. Returns 200 with user JSON if found, or 404 with `{ "error": "not_found" }` if not.
+
+- PATCH `/users/:id`
+  - 400 `{ "error": "missing_update_fields" }` when neither `username` nor `wallet_address` is provided.
+  - 400 `{ "error": "invalid_username" }` or `{ "error": "invalid_wallet_address" }` when validation fails.
+  - 404 `{ "error": "not_found" }` when the ID does not exist.
+  - 409 `{ "error": "username_taken" }` if a new username conflicts with another user.
+  - 500 `{ "error": "internal_error" }` for other database failures.
 
 - Other placeholders (`/transfer`, `/stake`, `/unstake`)
   - Return 501 with JSON error: `{ "error": "not_implemented" }`.

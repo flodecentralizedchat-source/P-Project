@@ -9,3 +9,4 @@ p-project-contracts = { path = "../p-project-contracts" }
 serde.workspace = true
 tokio.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"

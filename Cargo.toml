@@ -37,4 +37,5 @@ wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 md5 = "0.7"
+hex = "0.4"
 axum = "0.7"

@@ -5,12 +5,23 @@ use async_trait::async_trait;
 use ethers::contract::abigen;
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::{Http, Middleware, Provider};
-use ethers::signers::{LocalWallet, Signer};
+use ethers::signers::LocalWallet;
 use ethers::types::{Address, H256, U256};
 use std::sync::Arc;
 
 abigen!(Bridge, "abi/Bridge.json");
-abigen!(Erc20, "abi/ERC20.json");
+abigen!(
+    Erc20,
+    r#"[
+    function decimals() view returns (uint8)
+    function symbol() view returns (string)
+    function balanceOf(address owner) view returns (uint256)
+    function allowance(address owner, address spender) view returns (uint256)
+    function approve(address spender, uint256 value) returns (bool)
+    function transfer(address to, uint256 value) returns (bool)
+    function transferFrom(address from, address to, uint256 value) returns (bool)
+]"#
+);
 
 pub struct EthereumAdapter {
     provider: Option<Provider<Http>>,
@@ -35,6 +46,7 @@ impl EthereumAdapter {
                                 provider,
                                 signer: None,
                                 bridge_address,
+                                token_address,
                                 confirmations: c.confirmations,
                             }
                         }
@@ -96,7 +108,7 @@ impl ChainAdapter for EthereumAdapter {
             .await
             .map_err(|e| BridgeError::RpcUnavailable(e.to_string()))?;
         let scale = 10u128.pow(decimals as u32);
-        let scaled = U256::from(((amount * scale as f64).round() as u128));
+        let scaled = U256::from((amount * scale as f64).round() as u128);
 
         // Ensure allowance
         let owner = signer.address();
@@ -114,8 +126,8 @@ impl ChainAdapter for EthereumAdapter {
         }
 
         let bridge = Bridge::new(bridge_addr, signer.clone());
-        let pending = bridge
-            .lock(token_addr, scaled, recipient_addr)
+        let lock_call = bridge.lock(token_addr, scaled, recipient_addr);
+        let pending = lock_call
             .send()
             .await
             .map_err(|e| BridgeError::TxFailed(e.to_string()))?;
@@ -153,7 +165,7 @@ impl ChainAdapter for EthereumAdapter {
             .await
             .map_err(|e| BridgeError::RpcUnavailable(e.to_string()))?;
         let scale = 10u128.pow(decimals as u32);
-        let scaled = U256::from(((amount * scale as f64).round() as u128));
+        let scaled = U256::from((amount * scale as f64).round() as u128);
 
         let bridge = Bridge::new(bridge_addr, signer.clone());
         let h = if let Some(l) = lock_id {
@@ -162,8 +174,8 @@ impl ChainAdapter for EthereumAdapter {
         } else {
             H256::zero()
         };
-        let pending = bridge
-            .mint(token_addr, recipient_addr, scaled, h.into())
+        let mint_call = bridge.mint(token_addr, recipient_addr, scaled, h.into());
+        let pending = mint_call
             .send()
             .await
             .map_err(|e| BridgeError::TxFailed(e.to_string()))?;

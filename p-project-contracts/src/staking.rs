@@ -1,9 +1,40 @@
 use chrono::{Duration, Utc};
 use p_project_core::models::StakingInfo;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Custom error types for staking operations
+#[derive(Debug, Clone, PartialEq)]
+pub enum StakingError {
+    InvalidAmount,
+    NoStakingInfo,
+    StakingPositionExists,
+    EmergencyWithdrawalsDisabled,
+    DatabaseError(String),
+    SerializationError(String),
+}
+
+impl std::fmt::Display for StakingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StakingError::InvalidAmount => write!(f, "Amount must be positive"),
+            StakingError::NoStakingInfo => write!(f, "No staking info found for user"),
+            StakingError::StakingPositionExists => {
+                write!(f, "Target user already has a staking position")
+            }
+            StakingError::EmergencyWithdrawalsDisabled => {
+                write!(f, "Emergency withdrawals are currently disabled")
+            }
+            StakingError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
+            StakingError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for StakingError {}
+
 // Staking tier with different APY rates
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StakingTier {
     pub name: String,
     pub min_amount: f64,
@@ -11,6 +42,7 @@ pub struct StakingTier {
     pub apy_rate: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StakingContract {
     staking_infos: HashMap<String, StakingInfo>, // user_id -> staking info
     total_staked: f64,
@@ -71,14 +103,16 @@ impl StakingContract {
         user_id: String,
         amount: f64,
         duration_days: i64,
-    ) -> Result<String, String> {
+    ) -> Result<String, StakingError> {
         if amount <= 0.0 {
-            return Err("Amount must be positive".to_string());
+            return Err(StakingError::InvalidAmount);
         }
 
         // Determine staking tier based on amount and duration
         let tier_name = {
-            let tier = self.determine_tier(amount, duration_days)?;
+            let tier = self
+                .determine_tier(amount, duration_days)
+                .map_err(|_| StakingError::InvalidAmount)?;
             tier.name.clone()
         };
 
@@ -129,12 +163,12 @@ impl StakingContract {
     }
 
     /// Unstake tokens for a user with early unstaking penalties
-    pub fn unstake_tokens(&mut self, user_id: &str) -> Result<(f64, f64), String> {
+    pub fn unstake_tokens(&mut self, user_id: &str) -> Result<(f64, f64), StakingError> {
         // Returns (amount, rewards)
         let staking_info = self
             .staking_infos
             .remove(user_id)
-            .ok_or("No staking info found for user")?;
+            .ok_or(StakingError::NoStakingInfo)?;
 
         let now = Utc::now().naive_utc();
         let is_early_unstake = match staking_info.end_time {
@@ -156,16 +190,16 @@ impl StakingContract {
     }
 
     /// Emergency withdrawal (with higher penalties)
-    pub fn emergency_withdraw(&mut self, user_id: &str) -> Result<(f64, f64), String> {
+    pub fn emergency_withdraw(&mut self, user_id: &str) -> Result<(f64, f64), StakingError> {
         // Returns (amount, penalties)
         if !self.emergency_withdrawals_enabled {
-            return Err("Emergency withdrawals are currently disabled".to_string());
+            return Err(StakingError::EmergencyWithdrawalsDisabled);
         }
 
         let staking_info = self
             .staking_infos
             .remove(user_id)
-            .ok_or("No staking info found for user")?;
+            .ok_or(StakingError::NoStakingInfo)?;
 
         // Higher penalty for emergency withdrawal (50% of staked amount + all rewards)
         let penalty = staking_info.amount * 0.5;
@@ -181,13 +215,13 @@ impl StakingContract {
         &mut self,
         from_user_id: &str,
         to_user_id: String,
-    ) -> Result<(), String> {
+    ) -> Result<(), StakingError> {
         if !self.staking_infos.contains_key(from_user_id) {
-            return Err("No staking position found for the source user".to_string());
+            return Err(StakingError::NoStakingInfo);
         }
 
         if self.staking_infos.contains_key(&to_user_id) {
-            return Err("Target user already has a staking position".to_string());
+            return Err(StakingError::StakingPositionExists);
         }
 
         let staking_info = self.staking_infos.remove(from_user_id).unwrap();
@@ -250,13 +284,13 @@ impl StakingContract {
     }
 
     /// Compound rewards for a user (manually trigger compounding)
-    pub fn compound_rewards(&mut self, user_id: &str) -> Result<f64, String> {
+    pub fn compound_rewards(&mut self, user_id: &str) -> Result<f64, StakingError> {
         // Returns compounded amount
         let rewards = {
             let staking_info = self
                 .staking_infos
                 .get(user_id)
-                .ok_or("No staking info found for user")?;
+                .ok_or(StakingError::NoStakingInfo)?;
             self.calculate_rewards(staking_info)
         };
 
@@ -276,11 +310,11 @@ impl StakingContract {
     }
 
     /// Enable compounding for a staking position
-    pub fn enable_compounding(&mut self, user_id: &str) -> Result<(), String> {
+    pub fn enable_compounding(&mut self, user_id: &str) -> Result<(), StakingError> {
         let staking_info = self
             .staking_infos
             .get_mut(user_id)
-            .ok_or("No staking info found for user")?;
+            .ok_or(StakingError::NoStakingInfo)?;
         staking_info.is_compounding = true;
         Ok(())
     }

@@ -20,13 +20,13 @@ impl StakingService {
         user_id: String,
         amount: f64,
         duration_days: i64,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         self.staking_contract
             .stake_tokens(user_id, amount, duration_days)
     }
 
     /// Unstake tokens for a user
-    pub fn unstake_tokens(&mut self, user_id: &str) -> Result<f64, String> {
+    pub fn unstake_tokens(&mut self, user_id: &str) -> Result<(f64, f64), String> {
         self.staking_contract.unstake_tokens(user_id)
     }
 

@@ -18,11 +18,11 @@
 - [x] Add emergency withdrawal features
 
 **Airdrop Contract ([airdrop.rs](file:///d:/p-project/p-project-contracts/src/airdrop.rs))**
-- [ ] Complete Merkle tree verification implementation
-- [ ] Add airdrop claiming with signature verification
-- [ ] Implement referral bonus systems
-- [ ] Add airdrop pause/resume functionality
-- [ ] Create batch airdrop distribution methods
+- [x] Complete Merkle tree verification implementation
+- [x] Add airdrop claiming with signature verification
+- [x] Implement referral bonus systems
+- [x] Add airdrop pause/resume functionality
+- [x] Create batch airdrop distribution methods
 
 ### 2. Integration Requirements
 

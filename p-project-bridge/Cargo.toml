@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 p-project-core = { path = "../p-project-core" }
-p-project-contracts = { path = "../p-project-contracts" }
 serde.workspace = true
 tokio.workspace = true
 async-trait = "0.1"
 ethers = { version = "2", default-features = false, features = ["abigen", "ws", "rustls"] }
+chrono = "0.4"

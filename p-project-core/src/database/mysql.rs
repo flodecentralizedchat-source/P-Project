@@ -1,19 +1,52 @@
-use chrono::{NaiveDateTime, Utc};
-use sqlx::mysql::MySql;
-use sqlx::QueryBuilder;
 use sqlx::MySqlPool;
 use sqlx::Row;
+use chrono::{NaiveDateTime, Utc};
+use std::fmt;
 
 pub struct MySqlDatabase {
     pool: MySqlPool,
 }
+
+#[derive(Debug)]
+pub enum BalanceError {
+    Sql(sqlx::Error),
+    InsufficientBalance,
+    StakeNotFound,
+    UserNotFound,
+    InvalidAmount,
+}
+
+impl From<sqlx::Error> for BalanceError {
+    fn from(error: sqlx::Error) -> Self {
+        BalanceError::Sql(error)
+    }
+}
+
+impl fmt::Display for BalanceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BalanceError::Sql(err) => write!(f, "{}", err),
+            BalanceError::InsufficientBalance => write!(f, "insufficient_balance"),
+            BalanceError::StakeNotFound => write!(f, "stake_not_found"),
+            BalanceError::UserNotFound => write!(f, "user_not_found"),
+            BalanceError::InvalidAmount => write!(f, "invalid_amount"),
+        }
+    }
+}
+
+impl std::error::Error for BalanceError {}
 
 impl MySqlDatabase {
     pub async fn new(connection_string: &str) -> Result<Self, sqlx::Error> {
         let pool = MySqlPool::connect(connection_string).await?;
         Ok(Self { pool })
     }
-
+    
+    /// Get a reference to the database pool
+    pub fn get_pool(&self) -> &MySqlPool {
+        &self.pool
+    }
+    
     pub async fn init_tables(&self) -> Result<(), sqlx::Error> {
         // Create users table
         sqlx::query(
@@ -24,11 +57,11 @@ impl MySqlDatabase {
                 wallet_address VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            "#
         )
         .execute(&self.pool)
         .await?;
-
+        
         // Create transactions table
         sqlx::query(
             r#"
@@ -40,11 +73,11 @@ impl MySqlDatabase {
                 transaction_type VARCHAR(50) NOT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            "#
         )
         .execute(&self.pool)
         .await?;
-
+        
         // Create airdrops table
         sqlx::query(
             r#"
@@ -56,11 +89,11 @@ impl MySqlDatabase {
                 end_time TIMESTAMP NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            "#,
+            "#
         )
         .execute(&self.pool)
         .await?;
-
+        
         // Create airdrop_recipients table
         sqlx::query(
             r#"
@@ -75,7 +108,7 @@ impl MySqlDatabase {
                 PRIMARY KEY (airdrop_id, user_id),
                 FOREIGN KEY (airdrop_id) REFERENCES airdrops(id) ON DELETE CASCADE
             )
-            "#,
+            "#
         )
         .execute(&self.pool)
         .await?;
@@ -98,24 +131,105 @@ impl MySqlDatabase {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
-            "#,
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create token_states table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS token_states (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                state_data JSON NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create token_transactions table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS token_transactions (
+                id VARCHAR(255) PRIMARY KEY,
+                from_user_id VARCHAR(255) NOT NULL,
+                to_user_id VARCHAR(255) NOT NULL,
+                amount DECIMAL(18, 8) NOT NULL,
+                transaction_type VARCHAR(50) NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                transaction_data JSON NOT NULL
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create token_events table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS token_events (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                event_type VARCHAR(100) NOT NULL,
+                user_id VARCHAR(255) NOT NULL,
+                amount DECIMAL(18, 8) NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                details TEXT,
+                event_data JSON NOT NULL
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create staking_states table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS staking_states (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                state_data JSON NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create staking_infos table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS staking_infos (
+                user_id VARCHAR(255) PRIMARY KEY,
+                staking_data JSON NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create airdrop_states table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS airdrop_states (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                state_data JSON NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            "#
         )
         .execute(&self.pool)
         .await?;
 
         Ok(())
     }
-
+    
     // Airdrop related database operations
-    pub async fn create_airdrop(
-        &self,
-        airdrop_id: &str,
-        total_amount: f64,
-        start_time: Option<NaiveDateTime>,
-        end_time: Option<NaiveDateTime>,
-    ) -> Result<(), sqlx::Error> {
+    pub async fn create_airdrop(&self, airdrop_id: &str, total_amount: f64, start_time: Option<NaiveDateTime>, end_time: Option<NaiveDateTime>) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO airdrops (id, total_amount, start_time, end_time) VALUES (?, ?, ?, ?)",
+            "INSERT INTO airdrops (id, total_amount, start_time, end_time) VALUES (?, ?, ?, ?)"
         )
         .bind(airdrop_id)
         .bind(total_amount)
@@ -123,16 +237,11 @@ impl MySqlDatabase {
         .bind(end_time)
         .execute(&self.pool)
         .await?;
-
+        
         Ok(())
     }
-
-    pub async fn add_airdrop_recipients(
-        &self,
-        airdrop_id: &str,
-        recipients: &[(String, f64)],
-        category: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
+    
+    pub async fn add_airdrop_recipients(&self, airdrop_id: &str, recipients: &[(String, f64)], category: Option<&str>) -> Result<(), sqlx::Error> {
         for (user_id, amount) in recipients {
             sqlx::query(
                 "INSERT INTO airdrop_recipients (airdrop_id, user_id, amount, category) VALUES (?, ?, ?, ?)"
@@ -144,18 +253,20 @@ impl MySqlDatabase {
             .execute(&self.pool)
             .await?;
         }
-
+        
         // Update distributed amount in airdrop
         let total_new_amount: f64 = recipients.iter().map(|(_, amount)| amount).sum();
-        sqlx::query("UPDATE airdrops SET distributed_amount = distributed_amount + ? WHERE id = ?")
-            .bind(total_new_amount)
-            .bind(airdrop_id)
-            .execute(&self.pool)
-            .await?;
-
+        sqlx::query(
+            "UPDATE airdrops SET distributed_amount = distributed_amount + ? WHERE id = ?"
+        )
+        .bind(total_new_amount)
+        .bind(airdrop_id)
+        .execute(&self.pool)
+        .await?;
+        
         Ok(())
     }
-
+    
     pub async fn claim_airdrop(&self, airdrop_id: &str, user_id: &str) -> Result<f64, sqlx::Error> {
         // Get the amount to claim
         let row = sqlx::query(
@@ -165,9 +276,9 @@ impl MySqlDatabase {
         .bind(user_id)
         .fetch_one(&self.pool)
         .await?;
-
+        
         let amount: f64 = row.get("amount");
-
+        
         // Update claim status
         sqlx::query(
             "UPDATE airdrop_recipients SET claimed = TRUE, claimed_at = ? WHERE airdrop_id = ? AND user_id = ?"
@@ -177,41 +288,35 @@ impl MySqlDatabase {
         .bind(user_id)
         .execute(&self.pool)
         .await?;
-
+        
         Ok(amount)
     }
-
-    pub async fn is_airdrop_claimed(
-        &self,
-        airdrop_id: &str,
-        user_id: &str,
-    ) -> Result<bool, sqlx::Error> {
+    
+    pub async fn is_airdrop_claimed(&self, airdrop_id: &str, user_id: &str) -> Result<bool, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT claimed FROM airdrop_recipients WHERE airdrop_id = ? AND user_id = ?",
+            "SELECT claimed FROM airdrop_recipients WHERE airdrop_id = ? AND user_id = ?"
         )
         .bind(airdrop_id)
         .bind(user_id)
         .fetch_one(&self.pool)
         .await?;
-
+        
         let claimed: bool = row.get("claimed");
         Ok(claimed)
     }
-
-    pub async fn get_airdrop_status(
-        &self,
-        airdrop_id: &str,
-    ) -> Result<(f64, f64, usize, usize), sqlx::Error> {
+    
+    pub async fn get_airdrop_status(&self, airdrop_id: &str) -> Result<(f64, f64, usize, usize), sqlx::Error> {
         // Get airdrop info
-        let airdrop_row =
-            sqlx::query("SELECT total_amount, distributed_amount FROM airdrops WHERE id = ?")
-                .bind(airdrop_id)
-                .fetch_one(&self.pool)
-                .await?;
-
+        let airdrop_row = sqlx::query(
+            "SELECT total_amount, distributed_amount FROM airdrops WHERE id = ?"
+        )
+        .bind(airdrop_id)
+        .fetch_one(&self.pool)
+        .await?;
+        
         let total_amount: f64 = airdrop_row.get("total_amount");
         let distributed_amount: f64 = airdrop_row.get("distributed_amount");
-
+        
         // Get recipient counts
         let recipient_row = sqlx::query(
             "SELECT COUNT(*) as total_recipients, SUM(claimed) as claimed_recipients FROM airdrop_recipients WHERE airdrop_id = ?"
@@ -219,10 +324,10 @@ impl MySqlDatabase {
         .bind(airdrop_id)
         .fetch_one(&self.pool)
         .await?;
-
+        
         let total_recipients: i64 = recipient_row.get("total_recipients");
         let claimed_recipients: Option<i64> = recipient_row.get("claimed_recipients");
-
+        
         Ok((
             total_amount,
             distributed_amount,
@@ -230,45 +335,39 @@ impl MySqlDatabase {
             claimed_recipients.unwrap_or(0) as usize,
         ))
     }
-
-    pub async fn batch_claim_airdrops(
-        &self,
-        airdrop_id: &str,
-        user_ids: &[String],
-    ) -> Result<Vec<(String, f64)>, sqlx::Error> {
+    
+    pub async fn batch_claim_airdrops(&self, airdrop_id: &str, user_ids: &[String]) -> Result<Vec<(String, f64)>, sqlx::Error> {
         let mut claimed_amounts = Vec::new();
-
+        
         for user_id in user_ids {
             match self.claim_airdrop(airdrop_id, user_id).await {
                 Ok(amount) => claimed_amounts.push((user_id.clone(), amount)),
                 Err(_) => continue, // Skip failed claims
             }
         }
-
+        
         Ok(claimed_amounts)
     }
 }
 
 // User operations
 impl MySqlDatabase {
-    pub async fn create_user(
-        &self,
-        id: &str,
-        username: &str,
-        wallet_address: &str,
-    ) -> Result<crate::models::User, sqlx::Error> {
-        sqlx::query("INSERT INTO users (id, username, wallet_address) VALUES (?, ?, ?)")
-            .bind(id)
-            .bind(username)
-            .bind(wallet_address)
-            .execute(&self.pool)
-            .await?;
+    pub async fn create_user(&self, id: &str, username: &str, wallet_address: &str) -> Result<crate::models::User, sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO users (id, username, wallet_address) VALUES (?, ?, ?)"
+        )
+        .bind(id)
+        .bind(username)
+        .bind(wallet_address)
+        .execute(&self.pool)
+        .await?;
 
-        let row =
-            sqlx::query("SELECT id, username, wallet_address, created_at FROM users WHERE id = ?")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?;
+        let row = sqlx::query(
+            "SELECT id, username, wallet_address, created_at FROM users WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
 
         use crate::models::User;
         Ok(User {
@@ -278,50 +377,44 @@ impl MySqlDatabase {
             created_at: row.get("created_at"),
         })
     }
-
-    pub async fn update_user(
-        &self,
-        id: &str,
-        username: Option<&str>,
-        wallet_address: Option<&str>,
-    ) -> Result<Option<crate::models::User>, sqlx::Error> {
-        let mut builder = QueryBuilder::<MySql>::new("UPDATE users SET ");
-        let mut first = true;
-
+    
+    pub async fn update_user(&self, id: &str, username: Option<&str>, wallet_address: Option<&str>) -> Result<Option<crate::models::User>, sqlx::Error> {
+        let mut updates = Vec::new();
+        let mut params = Vec::new();
+        
         if let Some(username) = username {
-            if !first {
-                builder.push(", ");
-            }
-            builder.push("username = ").push_bind(username);
-            first = false;
+            updates.push("username = ?");
+            params.push(username);
         }
-
+        
         if let Some(wallet) = wallet_address {
-            if !first {
-                builder.push(", ");
-            }
-            builder.push("wallet_address = ").push_bind(wallet);
-            first = false;
+            updates.push("wallet_address = ?");
+            params.push(wallet);
         }
-
-        if first {
+        
+        if updates.is_empty() {
             return Ok(None);
         }
-
-        builder.push(" WHERE id = ").push_bind(id);
-
-        let query = builder.build();
-        let result = query.execute(&self.pool).await?;
-
+        
+        let mut query = format!("UPDATE users SET {} WHERE id = ?", updates.join(", "));
+        params.push(id);
+        
+        let mut query_builder = sqlx::query(&query);
+        for param in &params {
+            query_builder = query_builder.bind(param);
+        }
+        let result = query_builder.execute(&self.pool).await?;
+        
         if result.rows_affected() == 0 {
             return Ok(None);
         }
-
-        let row =
-            sqlx::query("SELECT id, username, wallet_address, created_at FROM users WHERE id = ?")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?;
+        
+        let row = sqlx::query(
+            "SELECT id, username, wallet_address, created_at FROM users WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
 
         use crate::models::User;
         Ok(Some(User {
@@ -331,13 +424,14 @@ impl MySqlDatabase {
             created_at: row.get("created_at"),
         }))
     }
-
+    
     pub async fn get_user(&self, id: &str) -> Result<Option<crate::models::User>, sqlx::Error> {
-        if let Some(row) =
-            sqlx::query("SELECT id, username, wallet_address, created_at FROM users WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?
+        if let Some(row) = sqlx::query(
+            "SELECT id, username, wallet_address, created_at FROM users WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
         {
             use crate::models::User;
             let user = User {
@@ -355,16 +449,7 @@ impl MySqlDatabase {
 
 // Bridge transactions
 impl MySqlDatabase {
-    pub async fn create_bridge_tx(
-        &self,
-        id: &str,
-        user_id: &str,
-        token: &str,
-        from_chain: &str,
-        to_chain: &str,
-        amount: f64,
-        status: &str,
-    ) -> Result<(), sqlx::Error> {
+    pub async fn insert_bridge_tx(&self, id: &str, user_id: &str, token: &str, from_chain: &str, to_chain: &str, amount: f64, status: &str) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO bridge_txs (id, user_id, token, from_chain, to_chain, amount, status) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
@@ -379,50 +464,53 @@ impl MySqlDatabase {
         .await?;
         Ok(())
     }
-
-    pub async fn set_bridge_src_tx(&self, id: &str, src_tx_hash: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE bridge_txs SET src_tx_hash = ? WHERE id = ?")
-            .bind(src_tx_hash)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    
+    pub async fn update_bridge_src_tx(&self, id: &str, src_tx_hash: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE bridge_txs SET src_tx_hash = ? WHERE id = ?"
+        )
+        .bind(src_tx_hash)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
-
-    pub async fn set_bridge_lock_id(&self, id: &str, lock_id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE bridge_txs SET lock_id = ? WHERE id = ?")
-            .bind(lock_id)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    
+    pub async fn update_bridge_lock_id(&self, id: &str, lock_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE bridge_txs SET lock_id = ? WHERE id = ?"
+        )
+        .bind(lock_id)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
-
-    pub async fn set_bridge_dst_tx(&self, id: &str, dst_tx_hash: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE bridge_txs SET dst_tx_hash = ? WHERE id = ?")
-            .bind(dst_tx_hash)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    
+    pub async fn update_bridge_dst_tx(&self, id: &str, dst_tx_hash: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE bridge_txs SET dst_tx_hash = ? WHERE id = ?"
+        )
+        .bind(dst_tx_hash)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
-
-    pub async fn update_bridge_status(
-        &self,
-        id: &str,
-        status: &str,
-        error_msg: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE bridge_txs SET status = ?, error_msg = ? WHERE id = ?")
-            .bind(status)
-            .bind(error_msg)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    
+    pub async fn update_bridge_status_row(&self, id: &str, status: &str, error_msg: Option<&str>) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE bridge_txs SET status = ?, error_msg = ? WHERE id = ?"
+        )
+        .bind(status)
+        .bind(error_msg)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
-
-    pub async fn get_bridge_tx(&self, id: &str) -> Result<crate::models::BridgeTx, sqlx::Error> {
+    
+    pub async fn fetch_bridge_tx(&self, id: &str) -> Result<crate::models::BridgeTx, sqlx::Error> {
         let row = sqlx::query(
             "SELECT id, user_id, token, from_chain, to_chain, amount, lock_id, src_tx_hash, dst_tx_hash, status, error_msg, created_at, updated_at FROM bridge_txs WHERE id = ?"
         )
@@ -447,23 +535,20 @@ impl MySqlDatabase {
             token: row.get("token"),
             from_chain: row.get("from_chain"),
             to_chain: row.get("to_chain"),
-            amount: row.get::<f64, _>("amount"),
-            lock_id: row.get::<Option<String>, _>("lock_id"),
-            src_tx_hash: row.get::<Option<String>, _>("src_tx_hash"),
-            dst_tx_hash: row.get::<Option<String>, _>("dst_tx_hash"),
+            amount: row.get("amount"),
+            lock_id: row.get("lock_id"),
+            src_tx_hash: row.get("src_tx_hash"),
+            dst_tx_hash: row.get("dst_tx_hash"),
             status,
-            error_msg: row.get::<Option<String>, _>("error_msg"),
+            error_msg: row.get("error_msg"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })
     }
-
-    pub async fn list_bridge_locked_without_dst(
-        &self,
-        from_chain: &str,
-    ) -> Result<Vec<crate::models::BridgeTx>, sqlx::Error> {
+    
+    pub async fn list_locked_without_dst(&self, from_chain: &str) -> Result<Vec<crate::models::BridgeTx>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, user_id, token, from_chain, to_chain, amount, lock_id, src_tx_hash, dst_tx_hash, status, error_msg, created_at, updated_at FROM bridge_txs WHERE status = 'Locked' AND from_chain = ? AND (dst_tx_hash IS NULL OR dst_tx_hash = '')"
+            "SELECT id, user_id, token, from_chain, to_chain, amount, lock_id, src_tx_hash, dst_tx_hash, status, error_msg, created_at, updated_at FROM bridge_txs WHERE status = 'Locked' AND from_chain = ? AND dst_tx_hash IS NULL"
         )
         .bind(from_chain)
         .fetch_all(&self.pool)
@@ -486,12 +571,12 @@ impl MySqlDatabase {
                 token: row.get("token"),
                 from_chain: row.get("from_chain"),
                 to_chain: row.get("to_chain"),
-                amount: row.get::<f64, _>("amount"),
-                lock_id: row.get::<Option<String>, _>("lock_id"),
-                src_tx_hash: row.get::<Option<String>, _>("src_tx_hash"),
-                dst_tx_hash: row.get::<Option<String>, _>("dst_tx_hash"),
+                amount: row.get("amount"),
+                lock_id: row.get("lock_id"),
+                src_tx_hash: row.get("src_tx_hash"),
+                dst_tx_hash: row.get("dst_tx_hash"),
                 status,
-                error_msg: row.get::<Option<String>, _>("error_msg"),
+                error_msg: row.get("error_msg"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
             });

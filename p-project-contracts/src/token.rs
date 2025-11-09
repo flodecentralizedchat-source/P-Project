@@ -1,10 +1,39 @@
 use chrono::Utc;
 use p_project_core::models::{TokenTransaction, TransactionType};
 use p_project_core::utils::generate_id;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Custom error types for token operations
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenError {
+    InsufficientBalance,
+    InsufficientFrozenBalance,
+    TransferLimitExceeded(f64),
+    InvalidAmount,
+    DatabaseError(String),
+    SerializationError(String),
+}
+
+impl std::fmt::Display for TokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenError::InsufficientBalance => write!(f, "Insufficient balance"),
+            TokenError::InsufficientFrozenBalance => write!(f, "Insufficient frozen balance"),
+            TokenError::TransferLimitExceeded(limit) => {
+                write!(f, "Transfer amount exceeds maximum limit of {}", limit)
+            }
+            TokenError::InvalidAmount => write!(f, "Amount must be positive"),
+            TokenError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
+            TokenError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for TokenError {}
+
 // Event structure for token operations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenEvent {
     pub event_type: String,
     pub user_id: String,
@@ -13,6 +42,7 @@ pub struct TokenEvent {
     pub details: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PProjectToken {
     total_supply: f64,
     balances: HashMap<String, f64>,         // user_id -> balance
@@ -81,11 +111,11 @@ impl PProjectToken {
         pool_id: String,
         user_id: &str,
         amount: f64,
-    ) -> Result<(), String> {
+    ) -> Result<(), TokenError> {
         // Check if user has enough balance
         let balance = self.balances.get(user_id).unwrap_or(&0.0);
         if *balance < amount {
-            return Err("Insufficient balance to add liquidity".to_string());
+            return Err(TokenError::InsufficientBalance);
         }
 
         // Update user balance
@@ -114,11 +144,11 @@ impl PProjectToken {
         pool_id: String,
         user_id: &str,
         amount: f64,
-    ) -> Result<(), String> {
+    ) -> Result<(), TokenError> {
         // Check if pool has enough liquidity
         let liquidity = self.liquidity_pools.get(&pool_id).unwrap_or(&0.0);
         if *liquidity < amount {
-            return Err("Insufficient liquidity in pool".to_string());
+            return Err(TokenError::InsufficientBalance);
         }
 
         // Update liquidity pool
@@ -162,19 +192,16 @@ impl PProjectToken {
         from_user_id: &str,
         to_user_id: &str,
         amount: f64,
-    ) -> Result<(), String> {
+    ) -> Result<(), TokenError> {
         // Anti-whale check
         if amount > self.max_transfer_limit {
-            return Err(format!(
-                "Transfer amount exceeds maximum limit of {}",
-                self.max_transfer_limit
-            ));
+            return Err(TokenError::TransferLimitExceeded(self.max_transfer_limit));
         }
 
         // Check if sender has enough balance
         let sender_balance = self.balances.get(from_user_id).unwrap_or(&0.0);
         if *sender_balance < amount {
-            return Err("Insufficient balance".to_string());
+            return Err(TokenError::InsufficientBalance);
         }
 
         // Calculate burn amount
@@ -279,10 +306,10 @@ impl PProjectToken {
     }
 
     /// Freeze user tokens (for staking or other purposes) with event logging
-    pub fn freeze_tokens(&mut self, user_id: &str, amount: f64) -> Result<(), String> {
+    pub fn freeze_tokens(&mut self, user_id: &str, amount: f64) -> Result<(), TokenError> {
         let balance = self.balances.get(user_id).unwrap_or(&0.0);
         if *balance < amount {
-            return Err("Insufficient balance to freeze".to_string());
+            return Err(TokenError::InsufficientBalance);
         }
 
         // Update balances
@@ -307,10 +334,10 @@ impl PProjectToken {
     }
 
     /// Unfreeze user tokens with event logging
-    pub fn unfreeze_tokens(&mut self, user_id: &str, amount: f64) -> Result<(), String> {
+    pub fn unfreeze_tokens(&mut self, user_id: &str, amount: f64) -> Result<(), TokenError> {
         let frozen_balance = self.frozen_balances.get(user_id).unwrap_or(&0.0);
         if *frozen_balance < amount {
-            return Err("Insufficient frozen balance to unfreeze".to_string());
+            return Err(TokenError::InsufficientFrozenBalance);
         }
 
         // Update frozen balance

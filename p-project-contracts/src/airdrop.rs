@@ -1,17 +1,57 @@
 use chrono::{NaiveDateTime, Utc};
+use md5;
 use p_project_core::utils::generate_id;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Custom error types for airdrop operations
+#[derive(Debug, Clone, PartialEq)]
+pub enum AirdropError {
+    InsufficientTokens,
+    UserNotEligible,
+    AirdropAlreadyClaimed,
+    InvalidMerkleProof,
+    InvalidSignature,
+    AirdropNotActive,
+    EmergencyWithdrawalsDisabled,
+    DatabaseError(String),
+    SerializationError(String),
+}
+
+impl std::fmt::Display for AirdropError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AirdropError::InsufficientTokens => write!(f, "Not enough tokens for airdrop"),
+            AirdropError::UserNotEligible => write!(f, "User not eligible for airdrop"),
+            AirdropError::AirdropAlreadyClaimed => write!(f, "Airdrop already claimed"),
+            AirdropError::InvalidMerkleProof => write!(f, "Invalid merkle proof"),
+            AirdropError::InvalidSignature => write!(f, "Invalid signature"),
+            AirdropError::AirdropNotActive => write!(f, "Airdrop is not currently active"),
+            AirdropError::EmergencyWithdrawalsDisabled => {
+                write!(f, "Emergency withdrawals are currently disabled")
+            }
+            AirdropError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
+            AirdropError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for AirdropError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AirdropContract {
     airdrop_id: String,
     total_amount: f64,
     distributed_amount: f64,
-    recipients: HashMap<String, f64>,    // user_id -> amount
-    claimed: HashMap<String, bool>,      // user_id -> claimed
-    start_time: Option<NaiveDateTime>,   // Time-limited airdrop start
-    end_time: Option<NaiveDateTime>,     // Time-limited airdrop end
-    categories: HashMap<String, String>, // user_id -> category
+    recipients: HashMap<String, f64>,            // user_id -> amount
+    claimed: HashMap<String, bool>,              // user_id -> claimed
+    start_time: Option<NaiveDateTime>,           // Time-limited airdrop start
+    end_time: Option<NaiveDateTime>,             // Time-limited airdrop end
+    categories: HashMap<String, String>,         // user_id -> category
+    merkle_proofs: HashMap<String, Vec<String>>, // user_id -> merkle proof
+    referrals: HashMap<String, String>,          // user_id -> referrer_id
+    paused: bool,                                // Airdrop pause status
+    signatures: HashMap<String, String>,         // user_id -> claim signature
 }
 
 impl AirdropContract {
@@ -25,6 +65,10 @@ impl AirdropContract {
             start_time: None,
             end_time: None,
             categories: HashMap::new(),
+            merkle_proofs: HashMap::new(),
+            referrals: HashMap::new(),
+            paused: false,
+            signatures: HashMap::new(),
         }
     }
 
@@ -43,11 +87,15 @@ impl AirdropContract {
             start_time: Some(start_time),
             end_time: Some(end_time),
             categories: HashMap::new(),
+            merkle_proofs: HashMap::new(),
+            referrals: HashMap::new(),
+            paused: false,
+            signatures: HashMap::new(),
         }
     }
 
     /// Add recipients to the airdrop
-    pub fn add_recipients(&mut self, recipients: Vec<(String, f64)>) -> Result<(), String> {
+    pub fn add_recipients(&mut self, recipients: Vec<(String, f64)>) -> Result<(), AirdropError> {
         self.add_recipients_with_category(recipients, None)
     }
 
@@ -56,11 +104,11 @@ impl AirdropContract {
         &mut self,
         recipients: Vec<(String, f64)>,
         category: Option<String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), AirdropError> {
         let total_new_amount: f64 = recipients.iter().map(|(_, amount)| amount).sum();
 
         if self.distributed_amount + total_new_amount > self.total_amount {
-            return Err("Not enough tokens for airdrop".to_string());
+            return Err(AirdropError::InsufficientTokens);
         }
 
         for (user_id, amount) in recipients {
@@ -76,13 +124,87 @@ impl AirdropContract {
     }
 
     /// Set merkle proof for a recipient
-    pub fn set_merkle_proof(&mut self, _user_id: &str, _proof: String) {
-        // In a real implementation, this would store the merkle proof
-        // For now, we'll just acknowledge the function exists
+    pub fn set_merkle_proof(&mut self, user_id: &str, proof: Vec<String>) {
+        self.merkle_proofs.insert(user_id.to_string(), proof);
+    }
+
+    /// Verify merkle proof for a recipient
+    pub fn verify_merkle_proof(&self, user_id: &str, proof: &[String], root: &str) -> bool {
+        if !self.recipients.contains_key(user_id) {
+            return false;
+        }
+
+        // Get the leaf hash for the user
+        let leaf_data = format!("{}:{}", user_id, self.recipients.get(user_id).unwrap());
+        let mut current_hash = format!("{:x}", md5::compute(leaf_data));
+
+        // Verify the proof against the root
+        for proof_element in proof {
+            let combined = if current_hash < *proof_element {
+                format!("{}{}", current_hash, proof_element)
+            } else {
+                format!("{}{}", proof_element, current_hash)
+            };
+            current_hash = format!("{:x}", md5::compute(combined));
+        }
+
+        current_hash == root
+    }
+
+    /// Set signature for a recipient
+    pub fn set_claim_signature(&mut self, user_id: &str, signature: String) {
+        self.signatures.insert(user_id.to_string(), signature);
+    }
+
+    /// Verify signature for a recipient
+    pub fn verify_signature(&self, user_id: &str, signature: &str) -> bool {
+        if let Some(expected_signature) = self.signatures.get(user_id) {
+            expected_signature == signature
+        } else {
+            false
+        }
+    }
+
+    /// Add referral relationship
+    pub fn add_referral(&mut self, user_id: &str, referrer_id: String) {
+        self.referrals.insert(user_id.to_string(), referrer_id);
+    }
+
+    /// Get referrer for a user
+    pub fn get_referrer(&self, user_id: &str) -> Option<&String> {
+        self.referrals.get(user_id)
+    }
+
+    /// Calculate referral bonus
+    pub fn calculate_referral_bonus(&self, user_id: &str, amount: f64) -> f64 {
+        if self.referrals.contains_key(user_id) {
+            amount * 0.05 // 5% referral bonus
+        } else {
+            0.0
+        }
+    }
+
+    /// Pause the airdrop
+    pub fn pause(&mut self) {
+        self.paused = true;
+    }
+
+    /// Resume the airdrop
+    pub fn resume(&mut self) {
+        self.paused = false;
+    }
+
+    /// Check if airdrop is paused
+    pub fn is_paused(&self) -> bool {
+        self.paused
     }
 
     /// Check if airdrop is active (for time-limited airdrops)
     pub fn is_active(&self) -> bool {
+        if self.paused {
+            return false;
+        }
+
         let now = Utc::now().naive_utc();
 
         match (self.start_time, self.end_time) {
@@ -93,33 +215,97 @@ impl AirdropContract {
         }
     }
 
-    /// Claim airdrop tokens
-    pub fn claim(&mut self, user_id: &str) -> Result<f64, String> {
+    /// Claim airdrop tokens with merkle proof and signature verification
+    pub fn claim_with_verification(
+        &mut self,
+        user_id: &str,
+        proof: Option<&[String]>,
+        root: Option<&str>,
+        signature: Option<&str>,
+    ) -> Result<f64, AirdropError> {
         // Check if airdrop is active (for time-limited airdrops)
         if !self.is_active() {
-            return Err("Airdrop is not currently active".to_string());
+            return Err(AirdropError::AirdropNotActive);
         }
 
         if !self.recipients.contains_key(user_id) {
-            return Err("User not eligible for airdrop".to_string());
+            return Err(AirdropError::UserNotEligible);
         }
 
         if self.claimed.get(user_id) == Some(&true) {
-            return Err("Airdrop already claimed".to_string());
+            return Err(AirdropError::AirdropAlreadyClaimed);
         }
 
-        let amount = *self.recipients.get(user_id).unwrap();
+        // Verify merkle proof if provided
+        if let (Some(proof), Some(root)) = (proof, root) {
+            if !self.verify_merkle_proof(user_id, proof, root) {
+                return Err(AirdropError::InvalidMerkleProof);
+            }
+        }
+
+        // Verify signature if provided
+        if let Some(signature) = signature {
+            if !self.verify_signature(user_id, signature) {
+                return Err(AirdropError::InvalidSignature);
+            }
+        }
+
+        let base_amount = *self.recipients.get(user_id).unwrap();
+        let referral_bonus = self.calculate_referral_bonus(user_id, base_amount);
+        let total_amount = base_amount + referral_bonus;
+
         self.claimed.insert(user_id.to_string(), true);
 
-        Ok(amount)
+        // If user has a referrer, award them a bonus
+        if let Some(referrer_id) = self.referrals.get(user_id) {
+            if let Some(referrer_amount) = self.recipients.get_mut(referrer_id) {
+                *referrer_amount += referral_bonus;
+            } else {
+                // Add referrer to recipients if not already there
+                self.recipients.insert(referrer_id.clone(), referral_bonus);
+                self.claimed.insert(referrer_id.clone(), false);
+            }
+        }
+
+        Ok(total_amount)
+    }
+
+    /// Claim airdrop tokens (simplified version for backward compatibility)
+    pub fn claim(&mut self, user_id: &str) -> Result<f64, AirdropError> {
+        self.claim_with_verification(user_id, None, None, None)
     }
 
     /// Batch claim airdrops for multiple users
-    pub fn batch_claim(&mut self, user_ids: Vec<String>) -> Result<Vec<(String, f64)>, String> {
+    pub fn batch_claim(
+        &mut self,
+        user_ids: Vec<String>,
+    ) -> Result<Vec<(String, f64)>, AirdropError> {
         let mut claimed_amounts = Vec::new();
 
         for user_id in user_ids {
             match self.claim(&user_id) {
+                Ok(amount) => claimed_amounts.push((user_id, amount)),
+                Err(_) => continue, // Skip failed claims
+            }
+        }
+
+        Ok(claimed_amounts)
+    }
+
+    /// Batch claim airdrops with verification
+    pub fn batch_claim_with_verification(
+        &mut self,
+        claims: Vec<(String, Option<Vec<String>>, Option<String>, Option<String>)>,
+    ) -> Result<Vec<(String, f64)>, AirdropError> {
+        let mut claimed_amounts = Vec::new();
+
+        for (user_id, proof, root, signature) in claims {
+            match self.claim_with_verification(
+                &user_id,
+                proof.as_deref(),
+                root.as_deref(),
+                signature.as_deref(),
+            ) {
                 Ok(amount) => claimed_amounts.push((user_id, amount)),
                 Err(_) => continue, // Skip failed claims
             }
@@ -146,6 +332,7 @@ impl AirdropContract {
             distributed_amount: self.distributed_amount,
             total_recipients: self.recipients.len(),
             claimed_recipients: self.claimed.values().filter(|&&claimed| claimed).count(),
+            is_paused: self.paused,
         }
     }
 
@@ -172,12 +359,14 @@ pub struct AirdropStatus {
     pub distributed_amount: f64,
     pub total_recipients: usize,
     pub claimed_recipients: usize,
+    pub is_paused: bool,
 }
 
 // Merkle tree implementation for airdrop verification
 pub struct MerkleTree {
     leaves: Vec<String>,
     layers: Vec<Vec<String>>,
+    root: String,
 }
 
 impl MerkleTree {
@@ -185,6 +374,7 @@ impl MerkleTree {
         let mut tree = MerkleTree {
             leaves,
             layers: Vec::new(),
+            root: String::new(),
         };
         tree.build_tree();
         tree
@@ -213,7 +403,11 @@ impl MerkleTree {
                 };
 
                 // Hash the pair (simplified implementation)
-                let combined = format!("{}{}", left, right);
+                let combined = if left < right {
+                    format!("{}{}", left, right)
+                } else {
+                    format!("{}{}", right, left)
+                };
                 let hash = format!("{:x}", md5::compute(combined));
                 next_layer.push(hash);
             }
@@ -221,10 +415,17 @@ impl MerkleTree {
             self.layers.push(next_layer.clone());
             current_layer = next_layer;
         }
+
+        // Set the root
+        if let Some(last_layer) = self.layers.last() {
+            if let Some(root) = last_layer.first() {
+                self.root = root.clone();
+            }
+        }
     }
 
-    pub fn get_root(&self) -> Option<&String> {
-        self.layers.last().and_then(|layer| layer.first())
+    pub fn get_root(&self) -> &str {
+        &self.root
     }
 
     pub fn get_proof(&self, index: usize) -> Option<Vec<String>> {
@@ -252,5 +453,20 @@ impl MerkleTree {
         }
 
         Some(proof)
+    }
+
+    pub fn verify_proof(&self, leaf: &str, proof: &[String]) -> bool {
+        let mut current_hash = format!("{:x}", md5::compute(leaf));
+
+        for proof_element in proof {
+            let combined = if current_hash < *proof_element {
+                format!("{}{}", current_hash, proof_element)
+            } else {
+                format!("{}{}", proof_element, current_hash)
+            };
+            current_hash = format!("{:x}", md5::compute(combined));
+        }
+
+        current_hash == self.root
     }
 }

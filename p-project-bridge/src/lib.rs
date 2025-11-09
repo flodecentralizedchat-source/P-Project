@@ -1,5 +1,5 @@
 use p_project_core::database::MySqlDatabase;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 mod adapter;
 mod config;
@@ -7,18 +7,21 @@ mod error;
 mod eth;
 mod relayer;
 mod solana;
+mod store;
 mod sui;
 
 use adapter::ChainAdapter;
+pub use adapter::{AdapterTxStatus, ChainAdapter};
 use config::BridgeConfig;
-use error::BridgeError;
+pub use error::BridgeError;
 use eth::EthereumAdapter;
-pub use relayer::Relayer;
+use relayer::Relayer;
 use solana::SolanaAdapter;
+pub use store::{BoxedBridgeError, BridgeStore};
 use sui::SuiAdapter;
 
 pub struct BridgeService {
-    db: MySqlDatabase,
+    db: Arc<dyn BridgeStore + Send + Sync>,
     supported_chains: Vec<String>,
     adapters: HashMap<String, Box<dyn ChainAdapter + Send + Sync>>,
 }
@@ -26,7 +29,25 @@ pub struct BridgeService {
 impl BridgeService {
     pub fn new(db: MySqlDatabase) -> Self {
         let cfg = BridgeConfig::from_env();
+        let adapters = Self::build_default_adapters(&cfg);
+        Self::with_adapters(Arc::new(db), adapters)
+    }
 
+    pub fn with_adapters(
+        db: Arc<dyn BridgeStore + Send + Sync>,
+        adapters: HashMap<String, Box<dyn ChainAdapter + Send + Sync>>,
+    ) -> Self {
+        let supported_chains = adapters.keys().cloned().collect::<Vec<_>>();
+        Self {
+            db,
+            supported_chains,
+            adapters,
+        }
+    }
+
+    fn build_default_adapters(
+        cfg: &BridgeConfig,
+    ) -> HashMap<String, Box<dyn ChainAdapter + Send + Sync>> {
         let mut adapters: HashMap<String, Box<dyn ChainAdapter + Send + Sync>> = HashMap::new();
 
         let eth = EthereumAdapter::new(cfg.eth.as_ref());
@@ -38,13 +59,7 @@ impl BridgeService {
         let sui = SuiAdapter::new(cfg.sui.as_ref());
         adapters.insert("Sui".to_string(), Box::new(sui));
 
-        let supported_chains = adapters.keys().cloned().collect::<Vec<_>>();
-
-        Self {
-            db,
-            supported_chains,
-            adapters,
-        }
+        adapters
     }
 
     /// Get supported chains
@@ -53,7 +68,7 @@ impl BridgeService {
     }
 
     pub fn relayer(&self) -> Relayer {
-        Relayer::new(&self.adapters, &self.db)
+        Relayer::new(&self.adapters, self.db.as_ref())
     }
 
     /// Bridge tokens from one chain to another
@@ -85,7 +100,6 @@ impl BridgeService {
 
         let tx_id = p_project_core::utils::generate_id();
 
-        // Create DB record as Pending
         if let Err(e) = self
             .db
             .create_bridge_tx(
@@ -96,7 +110,6 @@ impl BridgeService {
             return Err(format!("DB error: {}", e));
         }
 
-        // Lock on source
         let src_tx = match src.lock(user_id, token, amount, to_chain).await {
             Ok(h) => h,
             Err(e) => {
@@ -113,18 +126,23 @@ impl BridgeService {
         let _ = self.db.set_bridge_src_tx(&tx_id, &src_tx).await;
         let _ = self.db.update_bridge_status(&tx_id, "Locked", None).await;
 
-        // Try extract lockId and persist
         if let Ok(Some(lock_id)) = src.extract_lock_id(&src_tx).await {
             let _ = self.db.set_bridge_lock_id(&tx_id, &lock_id).await;
         }
 
-        // Mint/release on destination
         let lock_id_opt = match self.db.get_bridge_tx(&tx_id).await {
-            Ok(rec) => rec.lock_id.as_deref(),
+            Ok(rec) => rec.lock_id,
             Err(_) => None,
         };
         let dst_tx = match dst
-            .mint_or_release(user_id, token, amount, from_chain, &src_tx, lock_id_opt)
+            .mint_or_release(
+                user_id,
+                token,
+                amount,
+                from_chain,
+                &src_tx,
+                lock_id_opt.as_deref(),
+            )
             .await
         {
             Ok(h) => h,

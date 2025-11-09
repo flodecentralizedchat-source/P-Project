@@ -99,7 +99,6 @@ pub async fn get_user(
     }
 }
 
-
 pub async fn update_user(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -123,7 +122,7 @@ pub async fn update_user(
     let mut wallet_value = None;
     if let Some(raw_wallet) = request.wallet_address {
         let trimmed = raw_wallet.trim();
-        let valid = trimmed.startswith("0x")
+        let valid = trimmed.starts_with("0x")
             && trimmed.len() == 42
             && trimmed.chars().skip(2).all(|c| c.is_ascii_hexdigit());
         if !valid {
@@ -138,11 +137,7 @@ pub async fn update_user(
 
     match state
         .db
-        .update_user(
-            &id,
-            username_value.as_deref(),
-            wallet_value.as_deref(),
-        )
+        .update_user(&id, username_value.as_deref(), wallet_value.as_deref())
         .await
     {
         Ok(Some(user)) => Ok(Json(user)),
@@ -152,7 +147,10 @@ pub async fn update_user(
             if es.contains("1062") || es.contains("Duplicate entry") {
                 Err(api_error(StatusCode::CONFLICT, "username_taken"))
             } else {
-                Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"))
+                Err(api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                ))
             }
         }
     }

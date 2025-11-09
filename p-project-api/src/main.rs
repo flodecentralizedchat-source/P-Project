@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post},
+    routing::{get, patch, post},
     Router,
 };
 use p_project_core::database::MySqlDatabase;
@@ -31,7 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/", get(handlers::root))
         .route("/users", post(handlers::create_user))
-        .route("/users/:id", get(handlers::get_user))
+        .route(
+            "/users/:id",
+            get(handlers::get_user).patch(handlers::update_user),
+        )
         .route("/transfer", post(handlers::transfer_tokens))
         .route("/stake", post(handlers::stake_tokens))
         .route("/unstake", post(handlers::unstake_tokens))
