@@ -8,12 +8,15 @@ pub struct MongoDatabase {
 }
 
 impl MongoDatabase {
-    pub async fn new(connection_string: &str, db_name: &str) -> Result<Self, mongodb::error::Error> {
+    pub async fn new(
+        connection_string: &str,
+        db_name: &str,
+    ) -> Result<Self, mongodb::error::Error> {
         let client = Client::with_uri_str(connection_string).await?;
         let database = client.database(db_name);
         Ok(Self { database })
     }
-    
+
     pub async fn save_proposal(&self, proposal: &Proposal) -> Result<(), mongodb::error::Error> {
         let collection = self.database.collection::<ProposalDocument>("proposals");
         let doc = ProposalDocument {
@@ -28,7 +31,7 @@ impl MongoDatabase {
         collection.insert_one(doc, None).await?;
         Ok(())
     }
-    
+
     pub async fn get_active_proposals(&self) -> Result<Vec<Proposal>, mongodb::error::Error> {
         let collection = self.database.collection::<ProposalDocument>("proposals");
         let filter = mongodb::bson::doc! { "status": "Active" };

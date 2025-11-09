@@ -15,5 +15,5 @@ pub fn shorten_wallet_address(address: &str) -> String {
     if address.len() <= 10 {
         return address.to_string();
     }
-    format!("{}...{}", &address[..6], &address[address.len()-4..])
+    format!("{}...{}", &address[..6], &address[address.len() - 4..])
 }

@@ -29,4 +29,3 @@ impl Display for BridgeError {
 }
 
 impl Error for BridgeError {}
-

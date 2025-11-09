@@ -1,7 +1,7 @@
-pub mod token;
-pub mod staking;
 pub mod airdrop;
+pub mod staking;
+pub mod token;
 
-pub use token::PProjectToken;
-pub use staking::StakingContract;
 pub use airdrop::AirdropContract;
+pub use staking::StakingContract;
+pub use token::{PProjectToken, TokenEvent};

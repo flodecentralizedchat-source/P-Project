@@ -13,22 +13,28 @@ impl StakingService {
             db,
         }
     }
-    
+
     /// Stake tokens for a user
-    pub fn stake_tokens(&mut self, user_id: String, amount: f64, duration_days: i64) -> Result<(), String> {
-        self.staking_contract.stake_tokens(user_id, amount, duration_days)
+    pub fn stake_tokens(
+        &mut self,
+        user_id: String,
+        amount: f64,
+        duration_days: i64,
+    ) -> Result<(), String> {
+        self.staking_contract
+            .stake_tokens(user_id, amount, duration_days)
     }
-    
+
     /// Unstake tokens for a user
     pub fn unstake_tokens(&mut self, user_id: &str) -> Result<f64, String> {
         self.staking_contract.unstake_tokens(user_id)
     }
-    
+
     /// Get staking info for a user
     pub fn get_staking_info(&self, user_id: &str) -> Option<p_project_core::models::StakingInfo> {
         self.staking_contract.get_staking_info(user_id).cloned()
     }
-    
+
     /// Get total staked amount
     pub fn get_total_staked(&self) -> f64 {
         self.staking_contract.get_total_staked()

@@ -1,20 +1,21 @@
-use std::collections::HashMap;
 use p_project_core::database::MySqlDatabase;
+use std::collections::HashMap;
 
-mod error;
 mod adapter;
 mod config;
+mod error;
 mod eth;
+mod relayer;
 mod solana;
 mod sui;
-mod relayer;
 
 use adapter::ChainAdapter;
 use config::BridgeConfig;
+use error::BridgeError;
 use eth::EthereumAdapter;
+pub use relayer::Relayer;
 use solana::SolanaAdapter;
 use sui::SuiAdapter;
-use error::BridgeError;
 
 pub struct BridgeService {
     db: MySqlDatabase,
@@ -39,14 +40,22 @@ impl BridgeService {
 
         let supported_chains = adapters.keys().cloned().collect::<Vec<_>>();
 
-        Self { db, supported_chains, adapters }
+        Self {
+            db,
+            supported_chains,
+            adapters,
+        }
     }
-    
+
     /// Get supported chains
     pub fn get_supported_chains(&self) -> &[String] {
         &self.supported_chains
     }
-    
+
+    pub fn relayer(&self) -> Relayer {
+        Relayer::new(&self.adapters, &self.db)
+    }
+
     /// Bridge tokens from one chain to another
     pub async fn bridge_tokens(
         &self,
@@ -63,15 +72,27 @@ impl BridgeService {
             return Err(format!("Unsupported destination chain: {}", to_chain));
         }
 
-        let src = self.adapters.get(from_chain).ok_or_else(|| format!("No adapter for {}", from_chain))?;
-        let dst = self.adapters.get(to_chain).ok_or_else(|| format!("No adapter for {}", to_chain))?;
+        let src = self
+            .adapters
+            .get(from_chain)
+            .ok_or_else(|| format!("No adapter for {}", from_chain))?;
+        let dst = self
+            .adapters
+            .get(to_chain)
+            .ok_or_else(|| format!("No adapter for {}", to_chain))?;
 
         let token = "P";
 
         let tx_id = p_project_core::utils::generate_id();
 
         // Create DB record as Pending
-        if let Err(e) = self.db.create_bridge_tx(&tx_id, user_id, token, from_chain, to_chain, amount, "Pending").await {
+        if let Err(e) = self
+            .db
+            .create_bridge_tx(
+                &tx_id, user_id, token, from_chain, to_chain, amount, "Pending",
+            )
+            .await
+        {
             return Err(format!("DB error: {}", e));
         }
 
@@ -79,19 +100,43 @@ impl BridgeService {
         let src_tx = match src.lock(user_id, token, amount, to_chain).await {
             Ok(h) => h,
             Err(e) => {
-                let _ = self.db.update_bridge_status(&tx_id, "Failed", Some(&format!("{:?}", e))).await;
-                return Err(match e { BridgeError::Other(s) => s, _ => format!("Bridge error: {:?}", e) });
+                let _ = self
+                    .db
+                    .update_bridge_status(&tx_id, "Failed", Some(&format!("{:?}", e)))
+                    .await;
+                return Err(match e {
+                    BridgeError::Other(s) => s,
+                    _ => format!("Bridge error: {:?}", e),
+                });
             }
         };
         let _ = self.db.set_bridge_src_tx(&tx_id, &src_tx).await;
         let _ = self.db.update_bridge_status(&tx_id, "Locked", None).await;
 
+        // Try extract lockId and persist
+        if let Ok(Some(lock_id)) = src.extract_lock_id(&src_tx).await {
+            let _ = self.db.set_bridge_lock_id(&tx_id, &lock_id).await;
+        }
+
         // Mint/release on destination
-        let dst_tx = match dst.mint_or_release(user_id, token, amount, from_chain, &src_tx).await {
+        let lock_id_opt = match self.db.get_bridge_tx(&tx_id).await {
+            Ok(rec) => rec.lock_id.as_deref(),
+            Err(_) => None,
+        };
+        let dst_tx = match dst
+            .mint_or_release(user_id, token, amount, from_chain, &src_tx, lock_id_opt)
+            .await
+        {
             Ok(h) => h,
             Err(e) => {
-                let _ = self.db.update_bridge_status(&tx_id, "Failed", Some(&format!("{:?}", e))).await;
-                return Err(match e { BridgeError::Other(s) => s, _ => format!("Bridge error: {:?}", e) });
+                let _ = self
+                    .db
+                    .update_bridge_status(&tx_id, "Failed", Some(&format!("{:?}", e)))
+                    .await;
+                return Err(match e {
+                    BridgeError::Other(s) => s,
+                    _ => format!("Bridge error: {:?}", e),
+                });
             }
         };
         let _ = self.db.set_bridge_dst_tx(&tx_id, &dst_tx).await;
@@ -99,24 +144,22 @@ impl BridgeService {
 
         Ok(tx_id)
     }
-    
+
     /// Get bridge transaction status
     pub async fn get_bridge_status(&self, tx_id: &str) -> Result<BridgeStatus, String> {
         match self.db.get_bridge_tx(tx_id).await {
-            Ok(rec) => {
-                Ok(BridgeStatus {
-                    tx_id: rec.id,
-                    status: match rec.status {
-                        p_project_core::models::BridgeTxStatus::Pending => "Pending".to_string(),
-                        p_project_core::models::BridgeTxStatus::Locked => "Locked".to_string(),
-                        p_project_core::models::BridgeTxStatus::Minted => "Minted".to_string(),
-                        p_project_core::models::BridgeTxStatus::Failed => "Failed".to_string(),
-                    },
-                    from_chain: rec.from_chain,
-                    to_chain: rec.to_chain,
-                    amount: rec.amount,
-                })
-            }
+            Ok(rec) => Ok(BridgeStatus {
+                tx_id: rec.id,
+                status: match rec.status {
+                    p_project_core::models::BridgeTxStatus::Pending => "Pending".to_string(),
+                    p_project_core::models::BridgeTxStatus::Locked => "Locked".to_string(),
+                    p_project_core::models::BridgeTxStatus::Minted => "Minted".to_string(),
+                    p_project_core::models::BridgeTxStatus::Failed => "Failed".to_string(),
+                },
+                from_chain: rec.from_chain,
+                to_chain: rec.to_chain,
+                amount: rec.amount,
+            }),
             Err(e) => Err(format!("DB error: {}", e)),
         }
     }

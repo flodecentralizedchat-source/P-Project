@@ -33,6 +33,8 @@ pub struct StakingInfo {
     pub start_time: chrono::NaiveDateTime,
     pub end_time: Option<chrono::NaiveDateTime>,
     pub rewards_earned: f64,
+    pub tier_name: Option<String>, // Staking tier name
+    pub is_compounding: bool,      // Whether rewards are compounded
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +72,7 @@ pub struct BridgeTx {
     pub from_chain: String,
     pub to_chain: String,
     pub amount: f64,
+    pub lock_id: Option<String>,
     pub src_tx_hash: Option<String>,
     pub dst_tx_hash: Option<String>,
     pub status: BridgeTxStatus,

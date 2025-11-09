@@ -67,6 +67,7 @@ Choose one of the following setups.
 
 Notes
 - Most endpoints currently return `501 Not Implemented` until business logic is wired in (see Endpoints section). `POST /users` is implemented and persists to MySQL.
+- Input validation: 400 if `username` is not 3–32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
 - `/static` will be available because Docker builds the web crate and copies `pkg/` into the runtime image.
 
 5) Stop and clean up
@@ -130,6 +131,7 @@ Notes
 Notes
 - `/static` serves from a local `pkg/` directory. Unless you build the web crate to `pkg/` locally, requesting `/static/...` will return a 500. For API development only, you can ignore `/static`.
 - `POST /users` now inserts the user into the `users` table and returns the created record.
+- Input validation: 400 if `username` is not 3–32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
 
 ---
 
@@ -217,3 +219,19 @@ Responses
 - Environment examples: `.env.example`
 
 This guide targets development usage. For production hardening, you’ll want to lock CORS, configure secrets securely, add authentication in middleware, and implement the placeholder handlers.
+
+---
+
+## Error Responses and Endpoint Notes
+
+- POST `/users`
+  - 400 `{ "error": "invalid_username" }` when username fails validation (3–32 chars, `[A-Za-z0-9_-]`).
+  - 400 `{ "error": "invalid_wallet_address" }` when wallet fails basic `0x` + 40-hex check.
+  - 409 `{ "error": "username_taken" }` when username is already used.
+  - 500 `{ "error": "internal_error" }` for other DB failures.
+
+- GET `/users/:id`
+  - Implemented. Returns 200 with user JSON if found, or 404 with `{ "error": "not_found" }` if not.
+
+- Other placeholders (`/transfer`, `/stake`, `/unstake`)
+  - Return 501 with JSON error: `{ "error": "not_implemented" }`.

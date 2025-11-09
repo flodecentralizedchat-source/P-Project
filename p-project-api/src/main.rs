@@ -18,16 +18,15 @@ pub struct AppState {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize middleware
     middleware::init_middleware();
-    
+
     // Initialize database
-    let db_url = std::env::var("DATABASE_URL").unwrap_or("mysql://user:password@localhost/p_project".to_string());
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or("mysql://user:password@localhost/p_project".to_string());
     let db = MySqlDatabase::new(&db_url).await?;
     db.init_tables().await?;
-    
-    let app_state = AppState {
-        db: Arc::new(db),
-    };
-    
+
+    let app_state = AppState { db: Arc::new(db) };
+
     // Build router
     let app = Router::new()
         .route("/", get(handlers::root))
@@ -40,12 +39,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/airdrop/create", post(handlers::create_airdrop))
         .route("/airdrop/batch-claim", post(handlers::batch_claim_airdrops))
         .with_state(app_state);
-    
+
     // Run server
     let listener = TcpListener::bind("0.0.0.0:3001").await?;
     println!("Server running on http://localhost:3001");
-    
+
     axum::serve(listener, app).await?;
-    
+
     Ok(())
 }
