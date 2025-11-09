@@ -37,12 +37,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/stake", post(handlers::stake_tokens))
         .route("/unstake", post(handlers::unstake_tokens))
         .route("/airdrop/claim", post(handlers::claim_airdrop))
-        .with_state(app_state)
-        .layer(tower_http::cors::CorsLayer::permissive());
+        .route("/airdrop/create", post(handlers::create_airdrop))
+        .route("/airdrop/batch-claim", post(handlers::batch_claim_airdrops))
+        .with_state(app_state);
     
     // Run server
-    let listener = TcpListener::bind("0.0.0.0:3000").await?;
-    println!("Server running on http://localhost:3000");
+    let listener = TcpListener::bind("0.0.0.0:3001").await?;
+    println!("Server running on http://localhost:3001");
     
     axum::serve(listener, app).await?;
     

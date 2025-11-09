@@ -3,8 +3,18 @@ name = "p-project-airdrop"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "p_project_airdrop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "p-project-airdrop"
+path = "src/main.rs"
+
 [dependencies]
 p-project-core = { path = "../p-project-core" }
 p-project-contracts = { path = "../p-project-contracts" }
 serde.workspace = true
 tokio.workspace = true
+chrono.workspace = true
+sqlx.workspace = true

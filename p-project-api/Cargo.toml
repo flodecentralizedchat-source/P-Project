@@ -6,8 +6,10 @@ edition = "2021"
 [dependencies]
 p-project-core = { path = "../p-project-core" }
 p-project-contracts = { path = "../p-project-contracts" }
+p-project-airdrop = { path = "../p-project-airdrop" }
+axum.workspace = true
 serde.workspace = true
-tokio.workspace = true
-axum = "0.7"
-tower-http = { version = "0.5", features = ["cors"] }
 serde_json = "1.0"
+tokio.workspace = true
+tower-http = { version = "0.4", features = ["cors", "fs"] }
+chrono.workspace = true

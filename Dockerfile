@@ -52,3 +52,12 @@ USER appuser
 
 EXPOSE 3000
 CMD ["./p-project-api"]
+
+# Static web stage: Nginx serving built WASM package
+FROM nginx:alpine AS web-static
+
+# Copy built web assets from builder
+COPY --from=builder /app/p-project-web/pkg /usr/share/nginx/html
+
+# Provide nginx config with proper MIME types for WASM
+COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf

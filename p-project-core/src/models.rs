@@ -53,3 +53,27 @@ pub enum ProposalStatus {
     Rejected,
     Executed,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BridgeTxStatus {
+    Pending,
+    Locked,
+    Minted,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeTx {
+    pub id: String,
+    pub user_id: String,
+    pub token: String,
+    pub from_chain: String,
+    pub to_chain: String,
+    pub amount: f64,
+    pub src_tx_hash: Option<String>,
+    pub dst_tx_hash: Option<String>,
+    pub status: BridgeTxStatus,
+    pub error_msg: Option<String>,
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+}

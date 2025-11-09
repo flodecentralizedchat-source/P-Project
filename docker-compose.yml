@@ -5,11 +5,8 @@ services:
   mysql:
     image: mysql:8.0
     container_name: p_project_mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: p_project
-      MYSQL_USER: pproject
-      MYSQL_PASSWORD: pprojectpassword
+    env_file:
+      - .env
     ports:
       - "3306:3306"
     volumes:
@@ -41,9 +38,8 @@ services:
     container_name: p_project_mongodb
     ports:
       - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+    env_file:
+      - .env
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -57,13 +53,13 @@ services:
   # P-Project API
   api:
     build: .
+    image: p_project_api_image:latest
     container_name: p_project_api
+    pull_policy: build
     ports:
       - "3000:3000"
-    environment:
-      - DATABASE_URL=mysql://pproject:pprojectpassword@mysql:3306/p_project
-      - REDIS_URL=redis://redis:6379
-      - MONGODB_URL=mongodb://root:rootpassword@mongodb:27017/?authSource=admin
+    env_file:
+      - .env
     depends_on:
       mysql:
         condition: service_healthy
@@ -71,6 +67,17 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Nginx static server for WASM pkg
+  nginx:
+    build:
+      context: .
+      target: web-static
+    container_name: p_project_nginx
+    pull_policy: build
+    ports:
+      - "8080:80"
     restart: unless-stopped
 
 volumes:
