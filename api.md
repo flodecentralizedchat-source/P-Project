@@ -319,6 +319,19 @@ Responses
   - Test (curl): `curl http://localhost:3000/`
   - Test (PowerShell): `Invoke-RestMethod http://localhost:3000/`
 
+## Regression Testing
+
+- SQLx integration tests (requires a `TEST_DATABASE_URL`, default `mysql://pproject:pprojectpassword@localhost/p_project_test`):
+  ```bash
+  TEST_DATABASE_URL="mysql://pproject:pprojectpassword@localhost/p_project_test" cargo test -p p-project-api tests::transfer_updates_balances
+  ```
+  These cover the transfer, staking, and airdrop workflows by exercising the new database helpers.
+- HTTP harness (requires the API running on `API_BASE_URL`, and the same MySQL from `API_DB_URL`):
+  ```bash
+  API_BASE_URL=http://localhost:3000 API_DB_URL="mysql://pproject:pprojectpassword@localhost/p_project" cargo run -p p-project-api --bin harness
+  ```
+  This script drives `/transfer`, `/stake`, `/unstake`, and airdrop endpoints, then prints the responses for manual verification.
+
 ---
 
 ## Where Things Live

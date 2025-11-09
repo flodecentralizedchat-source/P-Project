@@ -26,7 +26,7 @@ mod tests {
         // Check that the transfer happened (exact balances are complex due to rewards)
         let user1_balance = token.get_balance("user1");
         let user2_balance = token.get_balance("user2");
-        
+
         // User1 should have less than their original 1000
         assert!(user1_balance < 1000.0);
         // User2 should have more than their original 500

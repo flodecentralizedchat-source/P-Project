@@ -1,20 +1,41 @@
 use p_project_core::database::MySqlDatabase;
-use p_project_core::models::{TransactionType, StakingInfo};
+use p_project_core::models::{StakingInfo, TransactionType};
 use sqlx::MySqlPool;
 
 async fn init_test_db() -> (MySqlDatabase, MySqlPool) {
-    let db_url =
-        std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| "mysql://pproject:pprojectpassword@localhost/p_project_test".to_string());
-    let db = MySqlDatabase::new(&db_url).await.expect("connect to test DB");
+    let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        "mysql://pproject:pprojectpassword@localhost/p_project_test".to_string()
+    });
+    let db = MySqlDatabase::new(&db_url)
+        .await
+        .expect("connect to test DB");
     db.init_tables().await.expect("init tables");
     let pool = MySqlPool::connect(&db_url).await.expect("connect pool");
 
-    sqlx::query("DELETE FROM transactions").execute(&pool).await.unwrap();
-    sqlx::query("DELETE FROM stakes").execute(&pool).await.unwrap();
-    sqlx::query("DELETE FROM balances").execute(&pool).await.unwrap();
-    sqlx::query("DELETE FROM users").execute(&pool).await.unwrap();
-    sqlx::query("DELETE FROM airdrop_recipients").execute(&pool).await.unwrap();
-    sqlx::query("DELETE FROM airdrops").execute(&pool).await.unwrap();
+    sqlx::query("DELETE FROM transactions")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM stakes")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM balances")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM airdrop_recipients")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM airdrops")
+        .execute(&pool)
+        .await
+        .unwrap();
 
     (db, pool)
 }
@@ -44,7 +65,11 @@ async fn transfer_updates_balances() {
     let (db, pool) = init_test_db().await;
 
     let user_a = db
-        .create_user("alice", "alice", "0xabc0000000000000000000000000000000000000")
+        .create_user(
+            "alice",
+            "alice",
+            "0xabc0000000000000000000000000000000000000",
+        )
         .await
         .unwrap();
     let user_b = db
@@ -64,16 +89,22 @@ async fn transfer_updates_balances() {
     .await
     .expect("transfer succeeds");
 
-    let available_a = sqlx::query!("SELECT available_balance FROM balances WHERE user_id = ?", user_a.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap()
-        .available_balance;
-    let available_b = sqlx::query!("SELECT available_balance FROM balances WHERE user_id = ?", user_b.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap()
-        .available_balance;
+    let available_a = sqlx::query!(
+        "SELECT available_balance FROM balances WHERE user_id = ?",
+        user_a.id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .available_balance;
+    let available_b = sqlx::query!(
+        "SELECT available_balance FROM balances WHERE user_id = ?",
+        user_b.id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .available_balance;
 
     assert_eq!(available_a, 75.0);
     assert_eq!(available_b, 25.0);
@@ -84,7 +115,11 @@ async fn stake_and_unstake_flow() {
     let (db, pool) = init_test_db().await;
 
     let user = db
-        .create_user("staker", "staker", "0xaaa0000000000000000000000000000000000000")
+        .create_user(
+            "staker",
+            "staker",
+            "0xaaa0000000000000000000000000000000000000",
+        )
         .await
         .unwrap();
 
@@ -95,13 +130,21 @@ async fn stake_and_unstake_flow() {
         .await
         .expect("stake");
 
-    assert!(matches!(stake_info, StakingInfo { rewards_earned: _, .. }));
+    assert!(matches!(
+        stake_info,
+        StakingInfo {
+            rewards_earned: _,
+            ..
+        }
+    ));
 
-    let balance_row =
-        sqlx::query!("SELECT available_balance, staked_balance FROM balances WHERE user_id = ?", user.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let balance_row = sqlx::query!(
+        "SELECT available_balance, staked_balance FROM balances WHERE user_id = ?",
+        user.id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(balance_row.available_balance, 150.0);
     assert_eq!(balance_row.staked_balance, 50.0);
 
@@ -111,11 +154,13 @@ async fn stake_and_unstake_flow() {
         .expect("unstake");
 
     assert!(unstake.end_time.is_some());
-    let balances =
-        sqlx::query!("SELECT available_balance, staked_balance FROM balances WHERE user_id = ?", user.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let balances = sqlx::query!(
+        "SELECT available_balance, staked_balance FROM balances WHERE user_id = ?",
+        user.id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(balances.available_balance, 200.0);
     assert_eq!(balances.staked_balance, 0.0);
 }
@@ -124,20 +169,20 @@ async fn stake_and_unstake_flow() {
 async fn airdrop_claims_work() {
     let (db, _pool) = init_test_db().await;
     let user = db
-        .create_user("claimer", "claimer", "0xaaa0000000000000000000000000000000000010")
+        .create_user(
+            "claimer",
+            "claimer",
+            "0xaaa0000000000000000000000000000000000010",
+        )
         .await
         .unwrap();
 
     db.create_airdrop("airdrop1", 500.0, None, None)
         .await
         .unwrap();
-    db.add_airdrop_recipients(
-        "airdrop1",
-        &[(user.id.clone(), 100.0)],
-        Some("test"),
-    )
-    .await
-    .unwrap();
+    db.add_airdrop_recipients("airdrop1", &[(user.id.clone(), 100.0)], Some("test"))
+        .await
+        .unwrap();
 
     let amount = db.claim_airdrop("airdrop1", &user.id).await.unwrap();
     assert_eq!(amount, 100.0);

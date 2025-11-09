@@ -39,14 +39,26 @@ struct AirdropClaimResponse {
 #[tokio::main]
 async fn main() -> Result<()> {
     let api_base = env::var("API_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let db_url =
-        env::var("API_DB_URL").unwrap_or_else(|_| "mysql://pproject:pprojectpassword@localhost/p_project".to_string());
+    let db_url = env::var("API_DB_URL")
+        .unwrap_or_else(|_| "mysql://pproject:pprojectpassword@localhost/p_project".to_string());
     let client = Client::new();
     let pool = MySqlPool::connect(&db_url).await?;
 
     // create two users
-    let alice = create_user(&client, &api_base, "alice", "0xabab000000000000000000000000000000000000").await?;
-    let bob = create_user(&client, &api_base, "bob", "0xbaba000000000000000000000000000000000000").await?;
+    let alice = create_user(
+        &client,
+        &api_base,
+        "alice",
+        "0xabab000000000000000000000000000000000000",
+    )
+    .await?;
+    let bob = create_user(
+        &client,
+        &api_base,
+        "bob",
+        "0xbaba000000000000000000000000000000000000",
+    )
+    .await?;
 
     // seed balances directly
     seed_balance(&pool, &alice.id, 150.0).await?;
@@ -115,7 +127,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn create_user(client: &Client, base: &str, username: &str, wallet: &str) -> Result<UserResponse> {
+async fn create_user(
+    client: &Client,
+    base: &str,
+    username: &str,
+    wallet: &str,
+) -> Result<UserResponse> {
     let res = client
         .post(&format!("{}/users", base))
         .json(&json!({ "username": username, "wallet_address": wallet }))
