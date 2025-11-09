@@ -1,0 +1,28 @@
+# Build artifacts
+target/
+**/target/
+
+# VCS
+.git/
+.gitignore
+.github/
+
+# Env and secrets
+.env
+
+# Node/yarn (if present)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+
+# Images and local scripts not needed for build context
+image.png
+build.sh
+build.ps1
+
+# Docker meta (keep Dockerfile, ignore own ignore file is fine)
+.dockerignore
