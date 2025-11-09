@@ -15,6 +15,8 @@ These steps cover the minimum environment, sequence, and commands to start the c
   ```
   Adjust values per your deployment/chain. `DATABASE_URL` is mandatory for both the API and bridge.
 
+- **Docker infrastructure**: you can spin up MySQL (plus Redis/Mongo that the repo ships) via `.\scripts\start-infra.ps1`, which runs the `docker-compose.yml` services (`mysql`, `redis`, `mongodb`) in detached mode. After the script completes, check `docker compose -f docker-compose.yml ps` to confirm readiness.
+
 ## 2. Run the API server (optional but usually next)
 1. From the workspace root run:
    ```bash
@@ -54,3 +56,5 @@ It runs the `BridgeService` with `MockStore` and `MockAdapter`s, triggers a `bri
 | 4 | `cargo run -p p-project-bridge --bin simulate_bridge` | Quick in-memory sanity check |
 
 Keep the database and bridge relayer shells running as you iterate. Restart either process if you change env vars or redeploy contracts.
+
+- **Clean rebuild**: if you want a warning-free cache (e.g., after you clean up unused warnings), run `cargo clean` then `cargo check -p p-project-airdrop` (or the crate you’re working on) before running the services so the diagnostics reflect the latest source.

@@ -278,13 +278,11 @@ Responses
     ]
   }
   ```
-
 ---
-
 ## Configuration Reference
 
 - Environment
-  - `DATABASE_URL` – MySQL connection string the API uses.
+  - `DATABASE_URL` - MySQL connection string the API uses.
   - In Docker Compose, `.env` feeds `mysql`, `mongodb`, `redis`, and `api` containers.
 - Networking
   - API listens on `0.0.0.0:3000`.
@@ -303,7 +301,7 @@ Responses
   - Verify `DATABASE_URL`. For Docker it should use hostname `mysql`; locally use `127.0.0.1`.
   - Ensure the database `p_project` exists and credentials match.
 - Static file 500 errors
-  - Ensure `pkg/` exists. In Docker, it’s built automatically. Locally, either build `p-project-web` to `pkg/` or ignore `/static` routes during API-only development.
+  - Ensure `pkg/` exists. In Docker, it's built automatically. Locally, either build `p-project-web` to `pkg/` or ignore `/static` routes during API-only development.
 - Containers not healthy
   - `docker compose ps` and `docker compose logs -f <service>` for details.
 
@@ -330,14 +328,14 @@ Responses
 - Compose stack: `docker-compose.yml`
 - Environment examples: `.env.example`
 
-This guide targets development usage. For production hardening, you’ll want to lock CORS, configure secrets securely, add authentication in middleware, and implement the placeholder handlers.
+This guide targets development usage. For production hardening, you'll want to lock CORS, configure secrets securely, add authentication in middleware, and implement the placeholder handlers.
 
 ---
 
 ## Error Responses and Endpoint Notes
 
 - POST `/users`
-  - 400 `{ "error": "invalid_username" }` when username fails validation (3–32 chars, `[A-Za-z0-9_-]`).
+  - 400 `{ "error": "invalid_username" }` when username fails validation (3-32 chars, `[A-Za-z0-9_-]`).
   - 400 `{ "error": "invalid_wallet_address" }` when wallet fails basic `0x` + 40-hex check.
   - 409 `{ "error": "username_taken" }` when username is already used.
   - 500 `{ "error": "internal_error" }` for other DB failures.
@@ -345,12 +343,31 @@ This guide targets development usage. For production hardening, you’ll want to
 - GET `/users/:id`
   - Implemented. Returns 200 with user JSON if found, or 404 with `{ "error": "not_found" }` if not.
 
-- PATCH `/users/:id`
-  - 400 `{ "error": "missing_update_fields" }` when neither `username` nor `wallet_address` is provided.
-  - 400 `{ "error": "invalid_username" }` or `{ "error": "invalid_wallet_address" }` when validation fails.
-  - 404 `{ "error": "not_found" }` when the ID does not exist.
-  - 409 `{ "error": "username_taken" }` if a new username conflicts with another user.
-  - 500 `{ "error": "internal_error" }` for other database failures.
+- POST `/transfer`
+  - 400 `{ "error": "invalid_amount" }` when the transfer amount isn't positive.
+  - 400 `{ "error": "insufficient_balance" }` when the sender lacks funds.
+  - 404 `{ "error": "user_not_found" }` when either wallet ID is missing.
+  - 500 `{ "error": "internal_error" }` for unexpected SQL failures.
 
-- Other placeholders (`/transfer`, `/stake`, `/unstake`)
-  - Return 501 with JSON error: `{ "error": "not_implemented" }`.
+- POST `/stake`
+  - 400 `{ "error": "invalid_amount" }` when the amount or duration is invalid.
+  - 400 `{ "error": "insufficient_balance" }` when available tokens are insufficient.
+  - 500 `{ "error": "internal_error" }` otherwise.
+
+- POST `/unstake`
+  - 404 `{ "error": "stake_not_found" }` if no active stake matches the request.
+  - 400 `{ "error": "insufficient_balance" }` when the staked balance cannot be released.
+  - 500 `{ "error": "internal_error" }` for other DB issues.
+
+- POST `/airdrop/claim`
+  - 404 `{ "error": "claim_not_found" }` if the user has no outstanding unclaimed allocation.
+  - 500 `{ "error": "internal_error" }` for SQL failures.
+
+- POST `/airdrop/create`
+  - 400 `{ "error": "invalid_airdrop" }` when the payload has no recipients or a non-positive total.
+  - 400 `{ "error": "amount_mismatch" }` when recipient totals exceed `total_amount`.
+  - 500 `{ "error": "internal_error" }` on insert failures.
+
+- POST `/airdrop/batch-claim`
+  - 400 `{ "error": "no_user_ids" }` when the request omits recipients.
+  - 500 `{ "error": "internal_error" }` for database errors.
