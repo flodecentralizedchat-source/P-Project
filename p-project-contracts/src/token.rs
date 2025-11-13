@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{NaiveDateTime, Utc};
 use p_project_core::models::{TokenTransaction, TransactionType};
 use p_project_core::utils::generate_id;
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,7 @@ pub enum TokenError {
     InvalidAmount,
     DatabaseError(String),
     SerializationError(String),
+    LiquidityLocked, // Added for liquidity locking mechanism
 }
 
 impl std::fmt::Display for TokenError {
@@ -26,6 +27,7 @@ impl std::fmt::Display for TokenError {
             TokenError::InvalidAmount => write!(f, "Amount must be positive"),
             TokenError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
             TokenError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+            TokenError::LiquidityLocked => write!(f, "Liquidity is locked"),
         }
     }
 }
@@ -42,6 +44,16 @@ pub struct TokenEvent {
     pub details: String,
 }
 
+// Liquidity lock structure for LP token locking mechanism
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiquidityLock {
+    pub pool_id: String,
+    pub amount: f64,
+    pub lock_start_date: NaiveDateTime,
+    pub lock_duration_months: i64,
+    pub is_unlocked: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PProjectToken {
     total_supply: f64,
@@ -54,6 +66,7 @@ pub struct PProjectToken {
     transaction_log: Vec<TokenTransaction>, // audit trail
     event_log: Vec<TokenEvent>,             // event logging
     liquidity_pools: HashMap<String, f64>,  // pool_id -> liquidity amount
+    liquidity_locks: HashMap<String, LiquidityLock>, // pool_id -> liquidity lock
 }
 
 impl PProjectToken {
@@ -69,6 +82,7 @@ impl PProjectToken {
             transaction_log: Vec::new(),
             event_log: Vec::new(),
             liquidity_pools: HashMap::new(),
+            liquidity_locks: HashMap::new(), // Initialize liquidity locks
         }
     }
 
@@ -151,6 +165,11 @@ impl PProjectToken {
             return Err(TokenError::InsufficientBalance);
         }
 
+        // Check if liquidity is locked
+        if self.is_liquidity_locked(&pool_id) {
+            return Err(TokenError::LiquidityLocked);
+        }
+
         // Update liquidity pool
         let new_liquidity = liquidity - amount;
         self.liquidity_pools.insert(pool_id.clone(), new_liquidity);
@@ -174,6 +193,63 @@ impl PProjectToken {
     /// Get liquidity in a pool
     pub fn get_pool_liquidity(&self, pool_id: &str) -> f64 {
         *self.liquidity_pools.get(pool_id).unwrap_or(&0.0)
+    }
+
+    /// Lock liquidity for 24 months as per tokenomics
+    pub fn lock_liquidity(&mut self, pool_id: String, amount: f64) -> Result<(), TokenError> {
+        let liquidity = self.liquidity_pools.get(&pool_id).unwrap_or(&0.0);
+        if *liquidity < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+
+        let lock = LiquidityLock {
+            pool_id: pool_id.clone(),
+            amount,
+            lock_start_date: Utc::now().naive_utc(),
+            lock_duration_months: 24, // 24 months as per tokenomics
+            is_unlocked: false,
+        };
+
+        self.liquidity_locks.insert(pool_id, lock);
+        Ok(())
+    }
+
+    /// Check if liquidity is locked
+    pub fn is_liquidity_locked(&self, pool_id: &str) -> bool {
+        if let Some(lock) = self.liquidity_locks.get(pool_id) {
+            if lock.is_unlocked {
+                return false;
+            }
+
+            let now = Utc::now().naive_utc();
+            let elapsed_duration = now - lock.lock_start_date;
+            let elapsed_months = elapsed_duration.num_days() / 30; // Approximate months
+
+            elapsed_months < lock.lock_duration_months
+        } else {
+            false
+        }
+    }
+
+    /// Unlock liquidity (for emergency purposes)
+    pub fn unlock_liquidity(&mut self, pool_id: &str) -> Result<(), TokenError> {
+        if let Some(lock) = self.liquidity_locks.get_mut(pool_id) {
+            lock.is_unlocked = true;
+            
+            let lock_amount = lock.amount; // Capture the amount before borrowing self again
+            
+            // Log event
+            self.log_event(
+                "LIQUIDITY_UNLOCKED".to_string(),
+                "SYSTEM".to_string(),
+                lock_amount,
+                "Liquidity unlocked".to_string(),
+            );
+            
+            Ok(())
+        } else {
+            Err(TokenError::InsufficientBalance)
+        }
     }
 
     /// Initialize token distribution to users

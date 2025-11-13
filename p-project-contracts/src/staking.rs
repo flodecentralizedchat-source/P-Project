@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDateTime, Utc};
 use p_project_core::models::StakingInfo;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -43,15 +43,27 @@ pub struct StakingTier {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StakingRewardsConfig {
+    pub total_rewards_pool: f64, // 17.5M tokens for staking rewards
+    pub start_date: NaiveDateTime,
+    pub year1_allocation: f64, // 40% of total rewards
+    pub year2_allocation: f64, // 30% of total rewards
+    pub year3_allocation: f64, // 20% of total rewards
+    pub year4_allocation: f64, // 10% of total rewards
+    pub distributed_rewards: f64, // Track distributed rewards
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StakingContract {
     staking_infos: HashMap<String, StakingInfo>, // user_id -> staking info
     total_staked: f64,
     staking_tiers: Vec<StakingTier>, // Different staking tiers with APY rates
     emergency_withdrawals_enabled: bool, // Emergency withdrawal feature flag
+    rewards_config: StakingRewardsConfig, // Staking rewards configuration
 }
 
 impl StakingContract {
-    pub fn new() -> Self {
+    pub fn new_with_rewards(total_rewards_pool: f64, start_date: NaiveDateTime) -> Self {
         // Initialize with default staking tiers
         let tiers = vec![
             StakingTier {
@@ -74,12 +86,59 @@ impl StakingContract {
             },
         ];
 
+        // Initialize rewards configuration with halving schedule
+        let rewards_config = StakingRewardsConfig {
+            total_rewards_pool,
+            start_date,
+            year1_allocation: total_rewards_pool * 0.4, // 40% in year 1
+            year2_allocation: total_rewards_pool * 0.3, // 30% in year 2
+            year3_allocation: total_rewards_pool * 0.2, // 20% in year 3
+            year4_allocation: total_rewards_pool * 0.1, // 10% in year 4
+            distributed_rewards: 0.0,
+        };
+
         Self {
             staking_infos: HashMap::new(),
             total_staked: 0.0,
             staking_tiers: tiers,
             emergency_withdrawals_enabled: false,
+            rewards_config,
         }
+    }
+
+    pub fn new() -> Self {
+        // Default constructor without specific rewards config
+        let start_date = Utc::now().naive_utc();
+        Self::new_with_rewards(17500000.0, start_date) // 17.5M tokens as per tokenomics
+    }
+
+    /// Get current year's reward allocation
+    pub fn get_current_year_allocation(&self) -> f64 {
+        let now = Utc::now().naive_utc();
+        let elapsed_duration = now - self.rewards_config.start_date;
+        let elapsed_years = elapsed_duration.num_days() / 365;
+
+        match elapsed_years {
+            0 => self.rewards_config.year1_allocation,
+            1 => self.rewards_config.year2_allocation,
+            2 => self.rewards_config.year3_allocation,
+            3 => self.rewards_config.year4_allocation,
+            _ => 0.0, // No rewards after year 4
+        }
+    }
+
+    /// Get remaining rewards for current year
+    pub fn get_remaining_yearly_rewards(&self) -> f64 {
+        let current_year_allocation = self.get_current_year_allocation();
+        let rewards_distributed_this_year = self.get_rewards_distributed_this_year();
+        current_year_allocation - rewards_distributed_this_year
+    }
+
+    /// Get rewards distributed this year
+    fn get_rewards_distributed_this_year(&self) -> f64 {
+        // This is a simplified implementation
+        // In a real implementation, you would track rewards by year
+        self.rewards_config.distributed_rewards
     }
 
     /// Enable or disable emergency withdrawals
@@ -186,6 +245,9 @@ impl StakingContract {
         let final_rewards = rewards - penalty;
         self.total_staked -= staking_info.amount;
 
+        // Update distributed rewards tracking
+        self.rewards_config.distributed_rewards += final_rewards;
+
         Ok((staking_info.amount, final_rewards))
     }
 
@@ -206,6 +268,9 @@ impl StakingContract {
         let rewards = self.calculate_rewards(&staking_info);
 
         self.total_staked -= staking_info.amount;
+
+        // Update distributed rewards tracking
+        self.rewards_config.distributed_rewards += rewards;
 
         Ok((staking_info.amount - penalty, rewards))
     }
@@ -306,6 +371,9 @@ impl StakingContract {
         // Reset start time to now for new compounding period
         staking_info.start_time = Utc::now().naive_utc();
 
+        // Update distributed rewards tracking
+        self.rewards_config.distributed_rewards += rewards;
+
         Ok(rewards)
     }
 
@@ -322,5 +390,10 @@ impl StakingContract {
     /// Check if emergency withdrawals are enabled
     pub fn is_emergency_withdrawals_enabled(&self) -> bool {
         self.emergency_withdrawals_enabled
+    }
+
+    /// Get staking rewards configuration
+    pub fn get_rewards_config(&self) -> &StakingRewardsConfig {
+        &self.rewards_config
     }
 }
