@@ -11,7 +11,7 @@ struct UserResponse {
     id: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct TransferResponse {
     transaction_id: String,
     from_user_id: String,
@@ -19,7 +19,7 @@ struct TransferResponse {
     amount: f64,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct StakingInfo {
     user_id: String,
     amount: f64,
@@ -28,7 +28,7 @@ struct StakingInfo {
     rewards_earned: f64,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct AirdropClaimResponse {
     airdrop_id: String,
     user_id: String,

@@ -529,6 +529,259 @@ impl MySqlDatabase {
             Ok(None)
         }
     }
+
+    /// Transfer tokens between users
+    pub async fn transfer_tokens(
+        &self,
+        transaction_id: &str,
+        from_user_id: &str,
+        to_user_id: &str,
+        amount: f64,
+        transaction_type: crate::models::TransactionType,
+    ) -> Result<(), BalanceError> {
+        if amount <= 0.0 {
+            return Err(BalanceError::InvalidAmount);
+        }
+
+        // Start a transaction
+        let mut tx = self.pool.begin().await.map_err(BalanceError::Sql)?;
+
+        // Check if from_user exists and has sufficient balance
+        let from_balance_row = sqlx::query(
+            "SELECT available_balance FROM balances WHERE user_id = ? FOR UPDATE"
+        )
+        .bind(from_user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        let from_balance = match from_balance_row {
+            Some(row) => row.get::<f64, _>("available_balance"),
+            None => return Err(BalanceError::UserNotFound),
+        };
+
+        if from_balance < amount {
+            return Err(BalanceError::InsufficientBalance);
+        }
+
+        // Check if to_user exists
+        let to_user_exists = sqlx::query("SELECT 1 FROM users WHERE id = ?")
+            .bind(to_user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(BalanceError::Sql)?
+            .is_some();
+
+        if !to_user_exists {
+            return Err(BalanceError::UserNotFound);
+        }
+
+        // Update balances
+        sqlx::query(
+            "UPDATE balances SET available_balance = available_balance - ? WHERE user_id = ?"
+        )
+        .bind(amount)
+        .bind(from_user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        sqlx::query(
+            "UPDATE balances SET available_balance = available_balance + ? WHERE user_id = ?"
+        )
+        .bind(amount)
+        .bind(to_user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Record transaction
+        let transaction_type_str = match transaction_type {
+            crate::models::TransactionType::Transfer => "transfer",
+            crate::models::TransactionType::Burn => "burn",
+            crate::models::TransactionType::Reward => "reward",
+            crate::models::TransactionType::Staking => "staking",
+        };
+
+        sqlx::query(
+            "INSERT INTO transactions (id, from_user_id, to_user_id, amount, transaction_type) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(transaction_id)
+        .bind(from_user_id)
+        .bind(to_user_id)
+        .bind(amount)
+        .bind(transaction_type_str)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Commit transaction
+        tx.commit().await.map_err(BalanceError::Sql)?;
+
+        Ok(())
+    }
+
+    /// Stake tokens for a user
+    pub async fn stake_tokens(
+        &self,
+        stake_id: &str,
+        user_id: &str,
+        amount: f64,
+        duration_days: i64,
+    ) -> Result<crate::models::StakingInfo, BalanceError> {
+        if amount <= 0.0 {
+            return Err(BalanceError::InvalidAmount);
+        }
+
+        // Start a transaction
+        let mut tx = self.pool.begin().await.map_err(BalanceError::Sql)?;
+
+        // Check if user exists and has sufficient balance
+        let user_balance_row = sqlx::query(
+            "SELECT available_balance FROM balances WHERE user_id = ? FOR UPDATE"
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        let available_balance = match user_balance_row {
+            Some(row) => row.get::<f64, _>("available_balance"),
+            None => return Err(BalanceError::UserNotFound),
+        };
+
+        if available_balance < amount {
+            return Err(BalanceError::InsufficientBalance);
+        }
+
+        // Update balances
+        sqlx::query(
+            "UPDATE balances SET available_balance = available_balance - ?, staked_balance = staked_balance + ? WHERE user_id = ?"
+        )
+        .bind(amount)
+        .bind(amount)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Insert stake record
+        let start_time = Utc::now().naive_utc();
+        let end_time = start_time + chrono::Duration::days(duration_days);
+
+        sqlx::query(
+            "INSERT INTO stakes (id, user_id, amount, duration_days, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(stake_id)
+        .bind(user_id)
+        .bind(amount)
+        .bind(duration_days)
+        .bind(start_time)
+        .bind(end_time)
+        .bind("active") // status
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Commit transaction
+        tx.commit().await.map_err(BalanceError::Sql)?;
+
+        // Return staking info
+        Ok(crate::models::StakingInfo {
+            user_id: user_id.to_string(),
+            amount,
+            start_time,
+            end_time: Some(end_time),
+            rewards_earned: 0.0,
+            tier_name: None,
+            is_compounding: false,
+        })
+    }
+
+    /// Unstake tokens for a user
+    pub async fn unstake_tokens(
+        &self,
+        user_id: &str,
+        stake_id: Option<&str>,
+    ) -> Result<crate::models::StakingInfo, BalanceError> {
+        // Start a transaction
+        let mut tx = self.pool.begin().await.map_err(BalanceError::Sql)?;
+
+        // Get stake record
+        let stake_query = if stake_id.is_some() {
+            "SELECT id, amount, start_time, end_time FROM stakes WHERE user_id = ? AND id = ? AND status = 'active' FOR UPDATE"
+        } else {
+            "SELECT id, amount, start_time, end_time FROM stakes WHERE user_id = ? AND status = 'active' FOR UPDATE"
+        };
+
+        let stake_row = if let Some(stake_id) = stake_id {
+            sqlx::query(stake_query)
+                .bind(user_id)
+                .bind(stake_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(BalanceError::Sql)?
+        } else {
+            sqlx::query(stake_query)
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(BalanceError::Sql)?
+        };
+
+        let stake_data = match stake_row {
+            Some(row) => {
+                let id: String = row.get("id");
+                let amount: f64 = row.get("amount");
+                let start_time: NaiveDateTime = row.get("start_time");
+                let end_time: Option<NaiveDateTime> = row.get("end_time");
+                (id, amount, start_time, end_time)
+            }
+            None => return Err(BalanceError::StakeNotFound),
+        };
+
+        let (stake_id_val, stake_amount, start_time, _end_time) = stake_data;
+
+        // Calculate rewards (simplified - in a real implementation, this would be more complex)
+        let rewards = 0.0; // For now, no rewards
+
+        // Update balances
+        let total_return = stake_amount + rewards;
+        sqlx::query(
+            "UPDATE balances SET available_balance = available_balance + ?, staked_balance = staked_balance - ? WHERE user_id = ?"
+        )
+        .bind(total_return)
+        .bind(stake_amount)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Update stake record
+        let end_time_now = Utc::now().naive_utc();
+        sqlx::query(
+            "UPDATE stakes SET status = 'completed', end_time = ? WHERE id = ?"
+        )
+        .bind(end_time_now)
+        .bind(stake_id_val)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Commit transaction
+        tx.commit().await.map_err(BalanceError::Sql)?;
+
+        // Return staking info
+        Ok(crate::models::StakingInfo {
+            user_id: user_id.to_string(),
+            amount: total_return,
+            start_time,
+            end_time: Some(end_time_now),
+            rewards_earned: rewards,
+            tier_name: None,
+            is_compounding: false,
+        })
+    }
 }
 
 // Bridge transactions

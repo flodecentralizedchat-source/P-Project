@@ -1,9 +1,9 @@
 Bucket,Percent,Tokens,VestingLock,Purpose,Notes
-Public Liquidity & Fair Launch,55,5500000000,LP tokens locked 24 months,"Deep, trustable liquidity",Seed P/USDC or P/ETH; publish lock TX
-Community Incentives,15,1500000000,Emissions over 36 months,"Quests, referrals, tipping",Sybil-resistant quests; capped referrals
-Ecosystem Grants,10,1000000000,"DAO-controlled, linear 36 months",Builders & integrations,RFPs + milestone payouts
-Charity Endowment,5,500000000,DAO-streamed; max 2%/month,Peace impact fund,Allocator on-chain; NGO registry
-Staking Rewards,5,500000000,"Halving: Y1 40%, Y2 30%, Y3 20%, Y4 10%",Holder utility,Fund StakingRewards
-Team,5,500000000,12m cliff → linear 24m,Long-term alignment,VestingVault enforced
-Advisors,1,100000000,6m cliff → linear 12m,Strategic support,Small pool
-Treasury Reserve,4,400000000,DAO timelock + proposals,Emergencies & listings,Transparent spend via votes
+Public Liquidity & Fair Launch,55,192500000,LP tokens locked 24 months,"Deep, trustable liquidity",Seed P/USDC or P/ETH; publish lock TX
+Community Incentives,15,52500000,Emissions over 36 months,"Quests, referrals, tipping",Sybil-resistant quests; capped referrals
+Ecosystem Grants,10,35000000,"DAO-controlled, linear 36 months",Builders & integrations,RFPs + milestone payouts
+Charity Endowment,5,17500000,DAO-streamed; max 2%/month,Peace impact fund,Allocator on-chain; NGO registry
+Staking Rewards,5,17500000,"Halving: Y1 40%, Y2 30%, Y3 20%, Y4 10%",Holder utility,Fund StakingRewards
+Team,5,17500000,12m cliff → linear 24m,Long-term alignment,VestingVault enforced
+Advisors,1,3500000,6m cliff → linear 12m,Strategic support,Small pool
+Treasury Reserve,4,14000000,DAO timelock + proposals,Emergencies & listings,Transparent spend via votes

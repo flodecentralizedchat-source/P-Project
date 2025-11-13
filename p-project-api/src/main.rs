@@ -1,18 +1,13 @@
 use axum::{
-    routing::{get, patch, post},
+    routing::{get, post},
     Router,
 };
 use p_project_core::database::MySqlDatabase;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 
 mod handlers;
 mod middleware;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db: Arc<MySqlDatabase>,
-}
+mod shared;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = MySqlDatabase::new(&db_url).await?;
     db.init_tables().await?;
 
-    let app_state = AppState { db: Arc::new(db) };
+    let app_state = shared::AppState { db: Arc::new(db) };
 
     // Build router
     let app = Router::new()
@@ -44,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(app_state);
 
     // Run server
-    let listener = TcpListener::bind("0.0.0.0:3000").await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     println!("Server running on http://localhost:3000");
 
     axum::serve(listener, app).await?;

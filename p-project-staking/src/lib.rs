@@ -1,4 +1,4 @@
-use p_project_contracts::staking::StakingContract;
+use p_project_contracts::staking::{StakingContract, StakingError};
 use p_project_core::database::MySqlDatabase;
 
 pub struct StakingService {
@@ -23,11 +23,14 @@ impl StakingService {
     ) -> Result<String, String> {
         self.staking_contract
             .stake_tokens(user_id, amount, duration_days)
+            .map_err(|e| e.to_string())
     }
 
     /// Unstake tokens for a user
     pub fn unstake_tokens(&mut self, user_id: &str) -> Result<(f64, f64), String> {
-        self.staking_contract.unstake_tokens(user_id)
+        self.staking_contract
+            .unstake_tokens(user_id)
+            .map_err(|e| e.to_string())
     }
 
     /// Get staking info for a user
