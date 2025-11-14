@@ -2,6 +2,7 @@
 name = "p-project"
 version = "0.1.0"
 edition = "2021"
+description = "P-Project: A Social Impact Blockchain Ecosystem combining DeFi, AI, IoT, and DAO governance for humanitarian aid and social verification"
 
 [dependencies]
 p-project-core = { path = "p-project-core" }
