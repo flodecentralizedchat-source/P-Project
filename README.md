@@ -16,6 +16,9 @@ P-Project transforms the meme coin concept into a robust, scalable ecosystem wit
 - **Airdrop Distribution** for early supporters
 - **Cross-Chain Bridge** for multi-network compatibility
 - **Web Interface** powered by WebAssembly for a seamless user experience
+- **AI Integration** for impact verification, NFT art generation, and fraud detection
+- **IoT Solutions** for smart donation boxes, refugee camp wristbands, and food distribution systems
+- **Web2 Integration** for social media donations, YouTube tips, and messaging platform bots
 
 ## 🏗️ Architecture
 
@@ -125,6 +128,24 @@ Seamless token transfers between:
 - Polygon
 - Base
 
+### AI Services
+Intelligent features powered by artificial intelligence:
+- **Impact Verification**: AI chatbots that verify social impact activities
+- **NFT Art Generation**: AI-powered creation of unique Peace NFTs
+- **Fraud Detection**: Machine learning models to detect suspicious activities
+
+### IoT Integration
+Real-world applications through Internet of Things:
+- **Smart Donation Boxes**: Hardware wallets for physical donations
+- **NFC Wristbands**: Digital identity and payment solutions for refugee camps
+- **QR-Code Food Distribution**: Efficient food aid distribution systems
+
+### Web2 Integration
+Bridging traditional platforms with blockchain:
+- **Social Media Widgets**: Donation widgets for Facebook and Instagram
+- **YouTube Tips**: "Tip in PeaceCoin" functionality for content creators
+- **Messaging Bots**: Telegram and Discord bots for tipping and transactions
+
 ## 🌐 Web Interface
 
 Our WebAssembly-powered frontend provides:
@@ -145,6 +166,18 @@ Our WebAssembly-powered frontend provides:
 | `/stake` | POST | Stake tokens for rewards |
 | `/unstake` | POST | Unstake tokens with rewards |
 | `/airdrop/claim` | POST | Claim airdrop tokens |
+| `/ai/verify-impact` | POST | Verify social impact with AI chatbots |
+| `/ai/generate-nft-art` | POST | Generate Peace NFT art with AI |
+| `/ai/detect-fraud` | POST | Detect fraudulent activities |
+| `/iot/register-donation-box` | POST | Register a new smart donation box |
+| `/iot/record-donation` | POST | Record a donation to a box |
+| `/iot/register-wristband` | POST | Register an NFC wristband |
+| `/iot/add-funds-wristband` | POST | Add funds to a wristband |
+| `/iot/create-food-qr` | POST | Create a food distribution QR code |
+| `/iot/claim-food-qr` | POST | Claim food using a QR code |
+| `/web2/create-donation-widget` | POST | Create a social media donation widget |
+| `/web2/process-youtube-tip` | POST | Process a YouTube tip transaction |
+| `/web2/register-messaging-bot` | POST | Register a messaging platform bot |
 
 ## 🤝 Community & Social
 
@@ -162,15 +195,19 @@ Join our vibrant community:
 - [x] Database integration
 - [x] Basic web interface
 
-### Phase 2: Expansion 🚧
-- [ ] DAO governance launch
-- [ ] Staking platform release
-- [ ] Cross-chain bridge deployment
-- [ ] Mobile app development
+### Phase 2: Expansion ✅
+- [x] DAO governance launch
+- [x] Staking platform release
+- [x] Cross-chain bridge deployment
+- [x] Mobile app development
+- [x] Advanced Use Cases Implementation:
+  - AI + P-Coin Integration (Impact verification chatbots, Peace NFT art generation, Fraud detection)
+  - IoT + P-Coin Integration (Smart donation boxes, NFC wristbands, QR-code food distribution)
+  - Web2 Integration (Social media widgets, YouTube tips, Messaging platform bots)
 
-### Phase 3: Innovation 🔮
-- [ ] NFT marketplace integration
-- [ ] DeFi yield farming pools
+### Phase 3: Innovation 🚧
+- [x] NFT marketplace integration
+- [x] DeFi yield farming pools
 - [ ] AI-powered meme generator
 - [ ] Layer 2 blockchain solution
 
