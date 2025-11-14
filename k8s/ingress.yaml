@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: p-project
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: p-project.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: p-project-web
+                port:
+                  number: 80
+    - host: api.p-project.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: p-project-api
+                port:
+                  number: 3000
+

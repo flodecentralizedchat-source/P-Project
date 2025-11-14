@@ -13,7 +13,7 @@ mod tests {
             0.003, // 0.3% fee
             "REWARD".to_string(),
             100000.0, // 100,000 reward tokens
-            0.12, // 12% APR
+            0.12,     // 12% APR
         );
 
         assert_eq!(pool.config.pool_id, "pool1");
@@ -44,7 +44,7 @@ mod tests {
             "user1".to_string(),
             1000.0, // 1000 TOKENA
             2000.0, // 2000 TOKENB
-            30, // 30 days
+            30,     // 30 days
         );
 
         assert!(result.is_ok());
@@ -77,30 +77,15 @@ mod tests {
         );
 
         // Test negative amount
-        let result = pool.add_liquidity(
-            "user1".to_string(),
-            -1000.0,
-            2000.0,
-            30,
-        );
+        let result = pool.add_liquidity("user1".to_string(), -1000.0, 2000.0, 30);
         assert_eq!(result, Err(LiquidityPoolError::InvalidAmount));
 
         // Test zero amount
-        let result = pool.add_liquidity(
-            "user1".to_string(),
-            0.0,
-            2000.0,
-            30,
-        );
+        let result = pool.add_liquidity("user1".to_string(), 0.0, 2000.0, 30);
         assert_eq!(result, Err(LiquidityPoolError::InvalidAmount));
 
         // Test negative second token amount
-        let result = pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            -2000.0,
-            30,
-        );
+        let result = pool.add_liquidity("user1".to_string(), 1000.0, -2000.0, 30);
         assert_eq!(result, Err(LiquidityPoolError::InvalidAmount));
     }
 
@@ -146,12 +131,8 @@ mod tests {
         );
 
         // Add liquidity first
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
         // Remove liquidity
         let result = pool.remove_liquidity("user1");
@@ -202,13 +183,14 @@ mod tests {
             1000.0, // 1000 TOKENA
             2000.0, // 2000 TOKENB
             30,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Calculate swap output
         let result = pool.calculate_swap_output("TOKENA", 100.0);
         assert!(result.is_ok());
         let output_amount = result.unwrap();
-        
+
         // With 0.3% fee, we should get less than the simple ratio would suggest
         // Simple ratio would be: 100 * 2000 / 1000 = 200
         // With fee: should be less than 200
@@ -229,12 +211,8 @@ mod tests {
         );
 
         // Add initial liquidity
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
         let initial_volume = pool.total_volume;
         let initial_fees = pool.total_fees;
@@ -266,12 +244,8 @@ mod tests {
         );
 
         // Add liquidity
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
         // Get initial yield (should be 0 or very small since no time has passed)
         let position = pool.get_position("user1").unwrap();
@@ -296,7 +270,7 @@ mod tests {
 
         // Calculate projected yield for 1000 liquidity over 365 days at 12% APR
         let projected_yield = pool.calculate_projected_yield(1000.0, 365.0);
-        
+
         // With daily compounding, we should get approximately 12% yield
         // But not exactly due to compounding effects
         assert!(projected_yield > 110.0); // Should be more than 11% (simple interest)
@@ -316,12 +290,8 @@ mod tests {
         );
 
         // Add liquidity
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
         // Update rewards
         let result = pool.update_rewards("user1");
@@ -361,12 +331,8 @@ mod tests {
         );
 
         // Add liquidity
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
         // Update rewards to have some accumulated
         pool.update_rewards("user1").unwrap();
@@ -374,7 +340,7 @@ mod tests {
         // Claim rewards
         let result = pool.claim_rewards("user1");
         assert!(result.is_ok());
-        
+
         let claimed_amount = result.unwrap();
         assert!(claimed_amount >= 0.0);
 
@@ -396,17 +362,13 @@ mod tests {
         );
 
         // Add liquidity
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
         // Get claimable rewards
         let result = pool.get_claimable_rewards("user1");
         assert!(result.is_ok());
-        
+
         let claimable_amount = result.unwrap();
         assert!(claimable_amount >= 0.0);
     }
@@ -424,19 +386,11 @@ mod tests {
         );
 
         // Add liquidity from multiple users
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
-        pool.add_liquidity(
-            "user2".to_string(),
-            2000.0,
-            4000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user2".to_string(), 2000.0, 4000.0, 30)
+            .unwrap();
 
         // Execute some swaps to generate fees
         pool.swap("TOKENA", 100.0).unwrap();
@@ -445,14 +399,14 @@ mod tests {
         // Distribute fees
         let result = pool.distribute_fees();
         assert!(result.is_ok());
-        
+
         let fee_distribution = result.unwrap();
         assert_eq!(fee_distribution.len(), 2); // Two users
-        
+
         // Check that both users get some fees
         assert!(fee_distribution.get("user1").is_some());
         assert!(fee_distribution.get("user2").is_some());
-        
+
         // User2 should get more fees since they provided more liquidity
         let user1_fees = fee_distribution.get("user1").unwrap();
         let user2_fees = fee_distribution.get("user2").unwrap();
@@ -472,19 +426,11 @@ mod tests {
         );
 
         // Add liquidity from multiple users
-        pool.add_liquidity(
-            "user1".to_string(),
-            1000.0,
-            2000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
 
-        pool.add_liquidity(
-            "user2".to_string(),
-            2000.0,
-            4000.0,
-            30,
-        ).unwrap();
+        pool.add_liquidity("user2".to_string(), 2000.0, 4000.0, 30)
+            .unwrap();
 
         // Execute some swaps to generate volume and fees
         pool.swap("TOKENA", 100.0).unwrap();
@@ -492,7 +438,7 @@ mod tests {
 
         // Get pool stats
         let stats = pool.get_pool_stats();
-        
+
         assert_eq!(stats.total_providers, 2);
         assert_eq!(stats.apr_rate, 0.12);
         assert_eq!(stats.total_volume, 300.0); // 100 + 200

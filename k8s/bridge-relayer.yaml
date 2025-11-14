@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: p-project-bridge-relayer
+  labels:
+    app: p-project-bridge-relayer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: p-project-bridge-relayer
+  template:
+    metadata:
+      labels:
+        app: p-project-bridge-relayer
+    spec:
+      containers:
+        - name: relayer
+          image: ghcr.io/example/p-project-bridge-relayer:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-secrets
+                  key: DATABASE_URL
+            # Ethereum (optional)
+            - name: ETH_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: ETH_RPC_URL
+            - name: ETH_BRIDGE_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: ETH_BRIDGE_ADDRESS
+            - name: ETH_TOKEN_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: ETH_TOKEN_ADDRESS
+            - name: ETH_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: ETH_PRIVATE_KEY
+            - name: ETH_CONFIRMATIONS
+              value: "3"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

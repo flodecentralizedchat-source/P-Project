@@ -20,12 +20,16 @@ impl fmt::Display for LiquidityPoolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LiquidityPoolError::InvalidAmount => write!(f, "Amount must be positive"),
-            LiquidityPoolError::InsufficientLiquidity => write!(f, "Insufficient liquidity in pool"),
+            LiquidityPoolError::InsufficientLiquidity => {
+                write!(f, "Insufficient liquidity in pool")
+            }
             LiquidityPoolError::PoolNotFound => write!(f, "Pool not found"),
             LiquidityPoolError::UserNotInPool => write!(f, "User not in pool"),
             LiquidityPoolError::PoolAlreadyExists => write!(f, "Pool already exists"),
             LiquidityPoolError::InvalidDuration => write!(f, "Invalid duration specified"),
-            LiquidityPoolError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+            LiquidityPoolError::SerializationError(msg) => {
+                write!(f, "Serialization error: {}", msg)
+            }
             LiquidityPoolError::InsufficientRewards => write!(f, "Insufficient rewards available"),
         }
     }
@@ -41,10 +45,10 @@ pub struct LiquidityPoolConfig {
     pub token_b: String, // Second token in the pair
     pub fee_tier: f64,   // Fee tier as percentage (e.g., 0.003 for 0.3%)
     pub start_date: NaiveDateTime,
-    pub reward_token: String, // Token used for rewards
+    pub reward_token: String,         // Token used for rewards
     pub total_reward_allocation: f64, // Total rewards allocated to this pool
-    pub distributed_rewards: f64, // Rewards already distributed
-    pub apr_rate: f64, // Annual percentage rate for yield farming
+    pub distributed_rewards: f64,     // Rewards already distributed
+    pub apr_rate: f64,                // Annual percentage rate for yield farming
 }
 
 // Liquidity provider position
@@ -70,9 +74,9 @@ pub struct LiquidityPool {
     pub total_token_a: f64,
     pub total_token_b: f64,
     pub liquidity_positions: HashMap<String, LiquidityPosition>, // user_id -> position
-    pub k_constant: f64, // Constant product formula: x * y = k
+    pub k_constant: f64,   // Constant product formula: x * y = k
     pub total_volume: f64, // Total volume traded through the pool
-    pub total_fees: f64, // Total fees collected
+    pub total_fees: f64,   // Total fees collected
 }
 
 impl LiquidityPool {
@@ -141,7 +145,7 @@ impl LiquidityPool {
 
         // Create or update liquidity position
         let start_time = Utc::now().naive_utc();
-        
+
         // Check if user already has a position
         let position = if let Some(existing_position) = self.liquidity_positions.get_mut(&user_id) {
             // Update existing position
@@ -213,7 +217,11 @@ impl LiquidityPool {
     }
 
     /// Calculate swap output amount
-    pub fn calculate_swap_output(&self, input_token: &str, input_amount: f64) -> Result<f64, LiquidityPoolError> {
+    pub fn calculate_swap_output(
+        &self,
+        input_token: &str,
+        input_amount: f64,
+    ) -> Result<f64, LiquidityPoolError> {
         if input_amount <= 0.0 {
             return Err(LiquidityPoolError::InvalidAmount);
         }
@@ -232,10 +240,11 @@ impl LiquidityPool {
 
         // Apply fee
         let input_amount_with_fee = input_amount * (1.0 - self.config.fee_tier);
-        
+
         // Constant product formula: (x + dx) * (y - dy) = x * y
         // Solving for dy: dy = y - (x * y) / (x + dx)
-        let output_amount = output_reserve - (self.k_constant / (input_reserve + input_amount_with_fee));
+        let output_amount =
+            output_reserve - (self.k_constant / (input_reserve + input_amount_with_fee));
 
         if output_amount <= 0.0 || output_amount > output_reserve {
             return Err(LiquidityPoolError::InsufficientLiquidity);
@@ -245,7 +254,11 @@ impl LiquidityPool {
     }
 
     /// Execute a swap
-    pub fn swap(&mut self, input_token: &str, input_amount: f64) -> Result<f64, LiquidityPoolError> {
+    pub fn swap(
+        &mut self,
+        input_token: &str,
+        input_amount: f64,
+    ) -> Result<f64, LiquidityPoolError> {
         let output_amount = self.calculate_swap_output(input_token, input_amount)?;
 
         // Update reserves
@@ -284,16 +297,16 @@ impl LiquidityPool {
         let now = Utc::now().naive_utc();
         let duration = now - position.last_reward_time;
         let days = duration.num_seconds() as f64 / 86400.0; // Convert to days
-        
+
         // Calculate yield using compound interest formula
         // A = P(1 + r/n)^(nt) where n = 365 (daily compounding)
         let principal = position.liquidity_amount;
         let rate = self.config.apr_rate;
         let n = 365.0; // Daily compounding
         let t = days / 365.0; // Time in years
-        
+
         let yield_amount = principal * ((1.0 + rate / n).powf(n * t) - 1.0);
-        
+
         yield_amount
     }
 
@@ -304,9 +317,9 @@ impl LiquidityPool {
         let rate = self.config.apr_rate;
         let n = 365.0; // Daily compounding
         let t = days / 365.0; // Time in years
-        
+
         let yield_amount = principal * ((1.0 + rate / n).powf(n * t) - 1.0);
-        
+
         yield_amount
     }
 
@@ -320,7 +333,7 @@ impl LiquidityPool {
             .clone();
 
         let yield_amount = self.calculate_yield(&position);
-        
+
         // Update the position in the map
         if let Some(pos) = self.liquidity_positions.get_mut(user_id) {
             pos.accumulated_rewards += yield_amount;
@@ -336,7 +349,7 @@ impl LiquidityPool {
             .liquidity_positions
             .get(user_id)
             .ok_or(LiquidityPoolError::UserNotInPool)?;
-        
+
         Ok(position.accumulated_rewards)
     }
 
@@ -379,7 +392,7 @@ impl LiquidityPool {
             pos.claimed_rewards = total_accumulated;
             pos.last_reward_time = Utc::now().naive_utc();
         }
-        
+
         self.config.distributed_rewards += claimable;
 
         Ok(claimable)
@@ -388,14 +401,14 @@ impl LiquidityPool {
     /// Distribute fees proportionally to liquidity providers
     pub fn distribute_fees(&self) -> Result<HashMap<String, f64>, LiquidityPoolError> {
         let mut fee_distribution = HashMap::new();
-        
+
         // Distribute fees proportionally based on liquidity contribution
         for (user_id, position) in &self.liquidity_positions {
             let share = position.liquidity_amount / self.total_liquidity;
             let fee_share = self.total_fees * share;
             fee_distribution.insert(user_id.clone(), fee_share);
         }
-        
+
         Ok(fee_distribution)
     }
 

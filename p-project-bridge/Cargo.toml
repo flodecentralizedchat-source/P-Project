@@ -10,3 +10,7 @@ tokio.workspace = true
 async-trait = "0.1"
 ethers = { version = "2", default-features = false, features = ["abigen", "ws", "rustls"] }
 chrono = "0.4"
+
+[[bin]]
+name = "p-project-bridge-relayer"
+path = "src/bin/relayer.rs"

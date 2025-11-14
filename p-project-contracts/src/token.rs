@@ -71,9 +71,9 @@ pub struct PProjectToken {
     total_transactions: u64,                // total transactions for activity tracking
     // New fields for additional protection mechanisms
     daily_transfer_limits: HashMap<String, (f64, NaiveDateTime)>, // user_id -> (amount, last_reset_date)
-    max_daily_transfer_percent: f64,        // max daily transfer as percentage of total supply
-    bot_protection_enabled: bool,           // anti-bot protection flag
-    bot_cooldown_period: i64,               // cooldown period in seconds
+    max_daily_transfer_percent: f64, // max daily transfer as percentage of total supply
+    bot_protection_enabled: bool,    // anti-bot protection flag
+    bot_cooldown_period: i64,        // cooldown period in seconds
     user_last_transaction: HashMap<String, NaiveDateTime>, // user_id -> last transaction time
     restricted_wallets: HashMap<String, bool>, // user_id -> is_restricted (for team wallets)
 }
@@ -253,9 +253,9 @@ impl PProjectToken {
     pub fn unlock_liquidity(&mut self, pool_id: &str) -> Result<(), TokenError> {
         if let Some(lock) = self.liquidity_locks.get_mut(pool_id) {
             lock.is_unlocked = true;
-            
+
             let lock_amount = lock.amount; // Capture the amount before borrowing self again
-            
+
             // Log event
             self.log_event(
                 "LIQUIDITY_UNLOCKED".to_string(),
@@ -263,7 +263,7 @@ impl PProjectToken {
                 lock_amount,
                 "Liquidity unlocked".to_string(),
             );
-            
+
             Ok(())
         } else {
             Err(TokenError::InsufficientBalance)
@@ -284,7 +284,7 @@ impl PProjectToken {
     fn get_dynamic_burn_rate(&self, user_id: &str) -> f64 {
         // Base burn rate
         let mut burn_rate = self.base_burn_rate;
-        
+
         // Increase burn rate during high activity periods
         // Check if this user has been very active (more than 10 transactions)
         if let Some(transaction_count) = self.activity_tracker.get(user_id) {
@@ -294,14 +294,14 @@ impl PProjectToken {
                 burn_rate += self.base_burn_rate * activity_multiplier;
             }
         }
-        
+
         // Global activity factor - increase burn rate when network is very active
         if self.total_transactions > 10000 {
             // Increase burn rate by up to 30% during high network activity
             let network_activity_multiplier = (self.total_transactions as f64 / 100000.0).min(0.3);
             burn_rate += self.base_burn_rate * network_activity_multiplier;
         }
-        
+
         burn_rate
     }
 
@@ -328,7 +328,10 @@ impl PProjectToken {
             "CONFIG_UPDATE".to_string(),
             "SYSTEM".to_string(),
             0.0,
-            format!("Bot protection {}", if enabled { "enabled" } else { "disabled" }),
+            format!(
+                "Bot protection {}",
+                if enabled { "enabled" } else { "disabled" }
+            ),
         );
     }
 
@@ -350,7 +353,15 @@ impl PProjectToken {
             "WALLET_RESTRICTION".to_string(),
             "SYSTEM".to_string(),
             0.0,
-            format!("Wallet {} {}", user_id, if restricted { "restricted" } else { "unrestricted" }),
+            format!(
+                "Wallet {} {}",
+                user_id,
+                if restricted {
+                    "restricted"
+                } else {
+                    "unrestricted"
+                }
+            ),
         );
     }
 
@@ -363,7 +374,7 @@ impl PProjectToken {
     fn check_daily_transfer_limit(&mut self, user_id: &str, amount: f64) -> Result<(), TokenError> {
         let now = Utc::now().naive_utc();
         let max_daily_limit = self.get_max_daily_transfer_limit();
-        
+
         // Reset daily limit if it's a new day
         if let Some((daily_amount, last_reset)) = self.daily_transfer_limits.get_mut(user_id) {
             let elapsed_duration = now - *last_reset;
@@ -372,12 +383,12 @@ impl PProjectToken {
                 *daily_amount = 0.0;
                 *last_reset = now;
             }
-            
+
             // Check if adding this amount would exceed daily limit
             if *daily_amount + amount > max_daily_limit {
                 return Err(TokenError::TransferLimitExceeded(max_daily_limit));
             }
-            
+
             // Update daily amount
             *daily_amount += amount;
         } else {
@@ -385,9 +396,10 @@ impl PProjectToken {
             if amount > max_daily_limit {
                 return Err(TokenError::TransferLimitExceeded(max_daily_limit));
             }
-            self.daily_transfer_limits.insert(user_id.to_string(), (amount, now));
+            self.daily_transfer_limits
+                .insert(user_id.to_string(), (amount, now));
         }
-        
+
         Ok(())
     }
 
@@ -396,19 +408,19 @@ impl PProjectToken {
         if !self.bot_protection_enabled {
             return Ok(());
         }
-        
+
         if let Some(last_transaction) = self.user_last_transaction.get(user_id) {
             let now = Utc::now().naive_utc();
             let elapsed_duration = now - *last_transaction;
             let elapsed_seconds = elapsed_duration.num_seconds();
-            
+
             if elapsed_seconds < self.bot_cooldown_period {
                 return Err(TokenError::TransferLimitExceeded(
-                    self.bot_cooldown_period as f64 - elapsed_seconds as f64
+                    self.bot_cooldown_period as f64 - elapsed_seconds as f64,
                 ));
             }
         }
-        
+
         Ok(())
     }
 
@@ -442,12 +454,16 @@ impl PProjectToken {
         }
 
         // Track activity for dynamic burn rate
-        let sender_activity = self.activity_tracker.entry(from_user_id.to_string()).or_insert(0);
+        let sender_activity = self
+            .activity_tracker
+            .entry(from_user_id.to_string())
+            .or_insert(0);
         *sender_activity += 1;
         self.total_transactions += 1;
 
         // Update last transaction time for bot protection
-        self.user_last_transaction.insert(from_user_id.to_string(), Utc::now().naive_utc());
+        self.user_last_transaction
+            .insert(from_user_id.to_string(), Utc::now().naive_utc());
 
         // Calculate dynamic burn amount
         let dynamic_burn_rate = self.get_dynamic_burn_rate(from_user_id);
@@ -492,7 +508,11 @@ impl PProjectToken {
             "TRANSFER".to_string(),
             from_user_id.to_string(),
             amount,
-            format!("Transferred to {} with dynamic burn rate of {}%", to_user_id, dynamic_burn_rate * 100.0),
+            format!(
+                "Transferred to {} with dynamic burn rate of {}%",
+                to_user_id,
+                dynamic_burn_rate * 100.0
+            ),
         );
 
         Ok(())

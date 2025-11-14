@@ -1,0 +1,43 @@
+# Pre-commit hooks to catch issues before pushing
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+      - id: fmt
+      - id: clippy
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        args: ["detect", "--no-git", "--redact", "--verbose"]
+
+  # Local hooks for cargo-audit and cargo-deny (install tools first)
+  - repo: local
+    hooks:
+      - id: cargo-audit
+        name: cargo audit
+        entry: bash -lc 'cargo audit --locked'
+        language: system
+        pass_filenames: false
+      - id: cargo-deny
+        name: cargo deny
+        entry: bash -lc 'cargo deny check --all-features'
+        language: system
+        pass_filenames: false
+
+default_stages: [commit]
+exclude: |
+  ^target/|
+  ^.git/|
+  ^p-project-web/pkg/
+

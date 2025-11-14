@@ -40,7 +40,7 @@ struct AirdropClaimResponse {
 async fn main() -> Result<()> {
     let api_base = env::var("API_BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let db_url = env::var("API_DB_URL")
-        .unwrap_or_else(|_| "mysql://pproject:pprojectpassword@localhost/p_project".to_string());
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "API_DB_URL not set"))?;
     let client = Client::new();
     let pool = MySqlPool::connect(&db_url).await?;
 
@@ -63,43 +63,54 @@ async fn main() -> Result<()> {
     // seed balances directly
     seed_balance(&pool, &alice.id, 150.0).await?;
 
-    let transfer = client
+    let mut req = client
         .post(&format!("{}/transfer", api_base))
         .json(&json!({
             "from_user_id": alice.id,
             "to_user_id": bob.id,
             "amount": 50.0
-        }))
+        }));
+    if let Ok(token) = env::var("AUTH_TOKEN") {
+        req = req.bearer_auth(token);
+    }
+    let transfer = req
         .send()
         .await?
         .json::<TransferResponse>()
         .await?;
     println!("Transfer completed: {:#?}", transfer);
 
-    let stake = client
+    let mut stake_req = client
         .post(&format!("{}/stake", api_base))
         .json(&json!({
             "user_id": alice.id,
             "amount": 40.0,
             "duration_days": 7
-        }))
+        }));
+    if let Ok(token) = env::var("AUTH_TOKEN") {
+        stake_req = stake_req.bearer_auth(token);
+    }
+    let stake = stake_req
         .send()
         .await?
         .json::<StakingInfo>()
         .await?;
     println!("Stake recorded: {:#?}", stake);
 
-    let unstake = client
+    let mut unstake_req = client
         .post(&format!("{}/unstake", api_base))
-        .json(&json!({ "user_id": alice.id }))
-        .send()
+        .json(&json!({ "user_id": alice.id }));
+    if let Ok(token) = env::var("AUTH_TOKEN") {
+        unstake_req = unstake_req.bearer_auth(token);
+    }
+    let unstake = unstake_req.send()
         .await?
         .json::<StakingInfo>()
         .await?;
     println!("Unstaked: {:#?}", unstake);
 
     let airdrop_id = format!("airdrop-{}", uuid::Uuid::new_v4());
-    client
+    let mut ad_req = client
         .post(&format!("{}/airdrop/create", api_base))
         .json(&json!({
             "total_amount": 200.0,
@@ -107,18 +118,24 @@ async fn main() -> Result<()> {
                 { "user_id": alice.id, "amount": 70.0 },
                 { "user_id": bob.id, "amount": 30.0 }
             ]
-        }))
-        .send()
+        }));
+    if let Ok(token) = env::var("AUTH_TOKEN") {
+        ad_req = ad_req.bearer_auth(token);
+    }
+    ad_req.send()
         .await?
         .error_for_status()?;
 
-    let claim = client
+    let mut claim_req = client
         .post(&format!("{}/airdrop/claim", api_base))
         .json(&json!({
             "airdrop_id": airdrop_id,
             "user_id": alice.id
-        }))
-        .send()
+        }));
+    if let Ok(token) = env::var("AUTH_TOKEN") {
+        claim_req = claim_req.bearer_auth(token);
+    }
+    let claim = claim_req.send()
         .await?
         .json::<AirdropClaimResponse>()
         .await?;

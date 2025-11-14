@@ -22,3 +22,6 @@ uuid = { version = "1.0", features = ["v4"] }
 sqlx = { workspace = true, features = ["runtime-tokio-rustls", "mysql", "chrono"] }
 redis = { workspace = true, features = ["tokio-comp"] }
 mongodb = { workspace = true, features = ["tokio-runtime"] }
+
+[features]
+decimal-amount = []

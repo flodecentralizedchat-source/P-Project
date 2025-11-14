@@ -44,7 +44,9 @@ services:
 
   # P-Project API
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: p-project-api/Dockerfile
     image: p_project_api_image:latest
     container_name: p_project_api
     pull_policy: build
@@ -52,6 +54,12 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || curl -fsS http://localhost:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       mysql:
         condition: service_healthy
@@ -61,12 +69,43 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Nginx static server for WASM pkg
+  # Bridge relayer worker
+  relayer:
+    build:
+      context: .
+      dockerfile: p-project-bridge/Dockerfile
+    image: p_project_bridge_relayer:latest
+    container_name: p_project_bridge_relayer
+    pull_policy: build
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Nginx static server for WASM pkg (with Brotli)
   nginx:
     build:
       context: .
-      target: web-static
+      dockerfile: nginx/Dockerfile
     container_name: p_project_nginx
+    pull_policy: build
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Standalone static web (no API dependency). Enable with --profile web
+  web-static:
+    profiles:
+      - web
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: p_project_nginx_web
     pull_policy: build
     ports:
       - "8080:80"

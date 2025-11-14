@@ -1,13 +1,13 @@
 //! Load testing framework for high-traffic scenarios
-//! 
+//!
 //! This module provides utilities for load testing the P-Project contracts
 //! under high-traffic conditions to ensure scalability and performance.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 use std::sync::Mutex;
+use std::time::Instant;
 
 /// Load test configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,20 +94,20 @@ impl LoadTester {
         let start = Instant::now();
         let _keypair = crate::advanced_cryptography::post_quantum::generate_keypair()?;
         let elapsed = start.elapsed().as_millis() as u64;
-        
+
         // Record timing
         {
             let mut times = self.request_times.lock().unwrap();
             times.push(elapsed);
         }
-        
+
         // Update metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.total_requests += 1;
             metrics.successful_requests += 1;
         }
-        
+
         Ok(())
     }
 
@@ -117,22 +117,23 @@ impl LoadTester {
         let start = Instant::now();
         let witness = b"test witness data";
         let public_inputs = b"test public inputs";
-        let _proof = crate::advanced_cryptography::zero_knowledge::generate_proof(witness, public_inputs)?;
+        let _proof =
+            crate::advanced_cryptography::zero_knowledge::generate_proof(witness, public_inputs)?;
         let elapsed = start.elapsed().as_millis() as u64;
-        
+
         // Record timing
         {
             let mut times = self.request_times.lock().unwrap();
             times.push(elapsed);
         }
-        
+
         // Update metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.total_requests += 1;
             metrics.successful_requests += 1;
         }
-        
+
         Ok(())
     }
 
@@ -141,30 +142,41 @@ impl LoadTester {
         // Simulate threshold signature generation
         let start = Instant::now();
         let scheme = crate::advanced_cryptography::threshold_signatures::new_scheme(2, 3);
-        let participants = crate::advanced_cryptography::threshold_signatures::generate_key_shares(&scheme)?;
+        let participants =
+            crate::advanced_cryptography::threshold_signatures::generate_key_shares(&scheme)?;
         let message = b"Test message for threshold signature";
-        
+
         let partial_signatures = vec![
-            crate::advanced_cryptography::threshold_signatures::generate_partial_signature(&participants[0], message)?,
-            crate::advanced_cryptography::threshold_signatures::generate_partial_signature(&participants[1], message)?,
+            crate::advanced_cryptography::threshold_signatures::generate_partial_signature(
+                &participants[0],
+                message,
+            )?,
+            crate::advanced_cryptography::threshold_signatures::generate_partial_signature(
+                &participants[1],
+                message,
+            )?,
         ];
-        let _combined_signature = crate::advanced_cryptography::threshold_signatures::combine_signatures(&partial_signatures, vec![0, 1])?;
-        
+        let _combined_signature =
+            crate::advanced_cryptography::threshold_signatures::combine_signatures(
+                &partial_signatures,
+                vec![0, 1],
+            )?;
+
         let elapsed = start.elapsed().as_millis() as u64;
-        
+
         // Record timing
         {
             let mut times = self.request_times.lock().unwrap();
             times.push(elapsed);
         }
-        
+
         // Update metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.total_requests += 1;
             metrics.successful_requests += 1;
         }
-        
+
         Ok(())
     }
 
@@ -177,31 +189,31 @@ impl LoadTester {
             1000.0,
             1000000.0,
             1000000.0,
-            0.003
+            0.003,
         );
-        
+
         let elapsed = start.elapsed().as_millis() as u64;
-        
+
         // Record timing
         {
             let mut times = self.request_times.lock().unwrap();
             times.push(elapsed);
         }
-        
+
         // Update metrics
         {
             let mut metrics = self.metrics.lock().unwrap();
             metrics.total_requests += 1;
             metrics.successful_requests += 1;
         }
-        
+
         Ok(())
     }
 
     /// Run a single user simulation
     fn run_user_simulation(&self, user_id: usize) -> Result<(), Box<dyn std::error::Error>> {
         println!("Starting user simulation {}", user_id);
-        
+
         for i in 0..self.config.requests_per_user {
             // Alternate between different operations
             match i % 4 {
@@ -219,13 +231,15 @@ impl LoadTester {
                 }
                 _ => unreachable!(),
             }
-            
+
             // Add delay between requests
             if self.config.request_delay_ms > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(self.config.request_delay_ms));
+                std::thread::sleep(std::time::Duration::from_millis(
+                    self.config.request_delay_ms,
+                ));
             }
         }
-        
+
         println!("Finished user simulation {}", user_id);
         Ok(())
     }
@@ -234,29 +248,31 @@ impl LoadTester {
     pub fn run_load_test(&self) -> Result<LoadTestResult, Box<dyn std::error::Error>> {
         let start_time = chrono::Utc::now().to_rfc3339();
         let start_instant = Instant::now();
-        
-        println!("Starting load test with {} concurrent users, {} requests per user",
-                 self.config.concurrent_users, self.config.requests_per_user);
-        
+
+        println!(
+            "Starting load test with {} concurrent users, {} requests per user",
+            self.config.concurrent_users, self.config.requests_per_user
+        );
+
         // Run user simulations sequentially (since we can't use async/await)
         for user_id in 0..self.config.concurrent_users {
             self.run_user_simulation(user_id)?;
         }
-        
+
         let duration = start_instant.elapsed();
         let end_time = chrono::Utc::now().to_rfc3339();
-        
+
         // Calculate final metrics
         let metrics = self.metrics.lock().unwrap().clone();
         let request_times = self.request_times.lock().unwrap().clone();
-        
+
         // Calculate average response time
         let avg_response_time_ms = if !request_times.is_empty() {
             request_times.iter().sum::<u64>() as f64 / request_times.len() as f64
         } else {
             0.0
         };
-        
+
         // Calculate requests per second
         let duration_seconds = duration.as_secs_f64();
         let requests_per_second = if duration_seconds > 0.0 {
@@ -264,21 +280,21 @@ impl LoadTester {
         } else {
             0.0
         };
-        
+
         // Calculate error rate
         let error_rate = if metrics.total_requests > 0 {
             metrics.failed_requests as f64 / metrics.total_requests as f64
         } else {
             0.0
         };
-        
+
         let final_metrics = LoadTestMetrics {
             avg_response_time_ms,
             requests_per_second,
             error_rate,
             ..metrics
         };
-        
+
         Ok(LoadTestResult {
             config: self.config.clone(),
             metrics: final_metrics,
@@ -303,7 +319,7 @@ impl Clone for LoadTester {
 pub mod security_audit {
     use super::*;
     use std::process::Command;
-    
+
     /// Security audit configuration
     #[derive(Debug, Clone)]
     pub struct SecurityAuditConfig {
@@ -314,7 +330,7 @@ pub mod security_audit {
         /// Custom security checks
         pub custom_checks: Vec<String>,
     }
-    
+
     /// Security audit result
     #[derive(Debug, Clone)]
     pub struct SecurityAuditResult {
@@ -329,14 +345,16 @@ pub mod security_audit {
         /// Overall security score (0.0 to 100.0)
         pub security_score: f64,
     }
-    
+
     /// Run a security audit
-    pub fn run_security_audit(config: SecurityAuditConfig) -> Result<SecurityAuditResult, Box<dyn std::error::Error>> {
+    pub fn run_security_audit(
+        config: SecurityAuditConfig,
+    ) -> Result<SecurityAuditResult, Box<dyn std::error::Error>> {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let mut cargo_audit_results = None;
         let mut clippy_security_results = None;
         let mut custom_check_results = HashMap::new();
-        
+
         // Run cargo-audit if requested
         if config.run_cargo_audit {
             match Command::new("cargo").args(&["audit"]).output() {
@@ -349,10 +367,13 @@ pub mod security_audit {
                 }
             }
         }
-        
+
         // Run clippy with security lints if requested
         if config.run_clippy_security {
-            match Command::new("cargo").args(&["clippy", "--", "-W", "clippy::all"]).output() {
+            match Command::new("cargo")
+                .args(&["clippy", "--", "-W", "clippy::all"])
+                .output()
+            {
                 Ok(output) => {
                     let result = String::from_utf8_lossy(&output.stdout).to_string();
                     clippy_security_results = Some(result);
@@ -362,7 +383,7 @@ pub mod security_audit {
                 }
             }
         }
-        
+
         // Run custom checks
         for check in config.custom_checks {
             match Command::new("sh").arg("-c").arg(&check).output() {
@@ -375,10 +396,10 @@ pub mod security_audit {
                 }
             }
         }
-        
+
         // Calculate a simple security score (in a real implementation, this would be more sophisticated)
         let security_score = 100.0; // Placeholder
-        
+
         Ok(SecurityAuditResult {
             timestamp,
             cargo_audit_results,
@@ -392,7 +413,7 @@ pub mod security_audit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_load_tester_creation() {
         let config = LoadTestConfig {
@@ -401,12 +422,12 @@ mod tests {
             request_delay_ms: 10,
             duration_seconds: None,
         };
-        
+
         let tester = LoadTester::new(config.clone());
         assert_eq!(config.concurrent_users, 2);
         assert_eq!(config.requests_per_user, 5);
     }
-    
+
     #[test]
     fn test_single_operation_simulation() {
         let config = LoadTestConfig {
@@ -415,34 +436,34 @@ mod tests {
             request_delay_ms: 0,
             duration_seconds: None,
         };
-        
+
         let tester = LoadTester::new(config);
-        
+
         // Test post-quantum operation
         let result = tester.simulate_post_quantum_operation();
         assert!(result.is_ok());
-        
+
         // Test ZK proof operation
         let result = tester.simulate_zk_proof_operation();
         assert!(result.is_ok());
-        
+
         // Test threshold signature operation
         let result = tester.simulate_threshold_signature_operation();
         assert!(result.is_ok());
-        
+
         // Test liquidity pool operation
         let result = tester.simulate_liquidity_pool_operation();
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_security_audit_framework() {
         let config = security_audit::SecurityAuditConfig {
-            run_cargo_audit: false, // Don't actually run audit in tests
+            run_cargo_audit: false,     // Don't actually run audit in tests
             run_clippy_security: false, // Don't actually run clippy in tests
             custom_checks: vec![],
         };
-        
+
         let result = security_audit::run_security_audit(config);
         assert!(result.is_ok());
     }

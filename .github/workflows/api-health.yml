@@ -1,0 +1,50 @@
+name: api-health
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start infra
+        run: |
+          docker compose up -d mysql redis mongodb
+          echo "Waiting for infra to be healthy..."
+          for svc in p_project_mysql p_project_redis p_project_mongodb; do
+            echo "Waiting for $svc";
+            for i in {1..60}; do
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$svc" 2>/dev/null || echo "starting")
+              if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
+                echo "$svc: $status"; break; fi
+              sleep 2
+              if [ $i -eq 60 ]; then echo "Timeout waiting for $svc"; docker ps; exit 1; fi
+            done
+          done
+
+      - name: Build and start API
+        run: |
+          docker compose up -d api
+          echo "Waiting for API to be healthy..."
+          for i in {1..120}; do
+            status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' p_project_api 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "API healthy"; break; fi
+            sleep 2
+            if [ $i -eq 120 ]; then echo "Timeout waiting for API"; docker compose logs api; exit 1; fi
+          done
+
+      - name: Probe health endpoint
+        run: |
+          curl -fsS http://localhost:3000/health || curl -fsS http://localhost:3000/
+
+      - name: Show API logs (on failure)
+        if: failure()
+        run: docker compose logs --no-color api
+

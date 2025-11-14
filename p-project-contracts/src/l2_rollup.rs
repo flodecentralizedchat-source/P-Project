@@ -107,17 +107,17 @@ impl RollupStateManager {
     pub fn update_state_root(&mut self) {
         // Create a simple state root based on account data
         let mut hasher = Keccak256::new();
-        
+
         // Sort accounts by address for consistent hashing
         let mut accounts: Vec<(&String, &L2Account)> = self.accounts.iter().collect();
         accounts.sort_by(|a, b| a.0.cmp(b.0));
-        
+
         for (_, account) in accounts {
             hasher.update(account.address.as_bytes());
             hasher.update(&account.balance.to_le_bytes());
             hasher.update(&account.nonce.to_le_bytes());
         }
-        
+
         let result = hasher.finalize();
         self.state_root = format!("{:x}", result);
     }
@@ -192,18 +192,18 @@ impl L2Rollup {
         }
 
         let state_root_before = self.state_manager.get_state_root().to_string();
-        
+
         // Process transactions and update state
         let transactions = self.pending_transactions.clone();
         self.pending_transactions.clear();
         for tx in &transactions {
             self.process_transaction(tx)?;
         }
-        
+
         let state_root_after = self.state_manager.get_state_root().to_string();
-        
+
         self.latest_block_number += 1;
-        
+
         let block = L2Block {
             block_number: self.latest_block_number,
             transactions: self.pending_transactions.clone(),
@@ -212,17 +212,18 @@ impl L2Rollup {
             timestamp: Utc::now().naive_utc(),
             batch_id: None,
         };
-        
+
         self.blocks.push(block.clone());
         self.pending_transactions.clear();
-        
+
         Ok(block)
     }
 
     /// Process a single transaction and update state
     fn process_transaction(&mut self, transaction: &L2Transaction) -> Result<(), RollupError> {
         // Deduct from sender
-        if let Some(mut sender_account) = self.state_manager.get_account(&transaction.from).cloned() {
+        if let Some(mut sender_account) = self.state_manager.get_account(&transaction.from).cloned()
+        {
             if sender_account.balance < transaction.amount {
                 return Err(RollupError::InsufficientBalance);
             }
@@ -234,11 +235,12 @@ impl L2Rollup {
         }
 
         // Add to receiver
-        let receiver_balance = if let Some(receiver_account) = self.state_manager.get_account(&transaction.to) {
-            receiver_account.balance
-        } else {
-            0.0
-        };
+        let receiver_balance =
+            if let Some(receiver_account) = self.state_manager.get_account(&transaction.to) {
+                receiver_account.balance
+            } else {
+                0.0
+            };
 
         let receiver_account = L2Account {
             address: transaction.to.clone(),
@@ -249,9 +251,9 @@ impl L2Rollup {
                 0
             },
         };
-        
+
         self.state_manager.update_account(receiver_account);
-        
+
         Ok(())
     }
 
@@ -263,18 +265,18 @@ impl L2Rollup {
 
         // Process all pending transactions
         let state_root_before = self.state_manager.get_state_root().to_string();
-        
+
         let transactions = self.pending_transactions.clone();
         self.pending_transactions.clear();
         for tx in &transactions {
             self.process_transaction(tx)?;
         }
-        
+
         let state_root_after = self.state_manager.get_state_root().to_string();
-        
+
         self.latest_batch_id += 1;
         let batch_id = format!("batch_{}", self.latest_batch_id);
-        
+
         let batch = L2Batch {
             batch_id: batch_id.clone(),
             transactions: self.pending_transactions.clone(),
@@ -283,17 +285,17 @@ impl L2Rollup {
             timestamp: Utc::now().naive_utc(),
             operator_signature: String::new(), // In a real implementation, this would be a cryptographic signature
         };
-        
+
         // Update all pending transactions with batch ID
         for block in self.blocks.iter_mut() {
             if block.batch_id.is_none() {
                 block.batch_id = Some(batch_id.clone());
             }
         }
-        
+
         self.batches.push(batch.clone());
         self.pending_transactions.clear();
-        
+
         Ok(batch)
     }
 

@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "p-project-airdrop"
 path = "src/main.rs"
 
+[[bin]]
+name = "airdrop-cron"
+path = "src/bin/cron.rs"
+
 [dependencies]
 p-project-core = { path = "../p-project-core" }
 p-project-contracts = { path = "../p-project-contracts" }

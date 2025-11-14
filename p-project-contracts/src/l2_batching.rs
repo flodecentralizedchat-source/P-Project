@@ -1,4 +1,4 @@
-use crate::l2_rollup::{L2Transaction, L2Block, RollupError};
+use crate::l2_rollup::{L2Block, L2Transaction, RollupError};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use std::collections::HashMap;
@@ -63,7 +63,7 @@ impl BatchValidator {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         if batch.timestamp > current_time + 60 {
             return Err(RollupError::BatchSubmissionFailed);
         }
@@ -118,7 +118,7 @@ impl BatchAggregator {
         // Validate transaction first
         let validator = BatchValidator::new(self.batch_config.clone());
         validator.validate_transaction(&transaction)?;
-        
+
         self.pending_transactions.push(transaction);
         Ok(())
     }
@@ -139,14 +139,13 @@ impl BatchAggregator {
             self.pending_transactions.len(),
             self.batch_config.max_transactions_per_batch,
         );
-        
-        let transactions: Vec<L2Transaction> = self.pending_transactions
-            .drain(0..batch_size)
-            .collect();
+
+        let transactions: Vec<L2Transaction> =
+            self.pending_transactions.drain(0..batch_size).collect();
 
         self.batch_counter += 1;
         let batch_id = format!("batch_{}", self.batch_counter);
-        
+
         // Calculate gas used (simplified)
         let gas_used = transactions.len() as u64 * 21000; // Base gas per transaction
 
@@ -180,7 +179,7 @@ impl BatchAggregator {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         if current_time - last_batch_time >= self.batch_config.batch_timeout {
             return !self.pending_transactions.is_empty();
         }
@@ -214,13 +213,16 @@ impl BatchSubmitter {
     }
 
     /// Submit a batch to the L1
-    pub fn submit_batch(&mut self, batch: TransactionBatch) -> Result<BatchSubmissionResult, RollupError> {
+    pub fn submit_batch(
+        &mut self,
+        batch: TransactionBatch,
+    ) -> Result<BatchSubmissionResult, RollupError> {
         // Validate batch
         self.validator.validate_batch(&batch)?;
 
         // Simulate batch submission to L1
         let transaction_hash = self.simulate_batch_submission(&batch)?;
-        
+
         let result = BatchSubmissionResult {
             batch_id: batch.batch_id.clone(),
             transaction_hash,
@@ -230,8 +232,9 @@ impl BatchSubmitter {
         };
 
         // Store result
-        self.submitted_batches.insert(batch.batch_id.clone(), result.clone());
-        
+        self.submitted_batches
+            .insert(batch.batch_id.clone(), result.clone());
+
         Ok(result)
     }
 
@@ -244,13 +247,13 @@ impl BatchSubmitter {
         hasher.update(batch.state_root_after.as_bytes());
         hasher.update(&batch.gas_used.to_le_bytes());
         hasher.update(&batch.timestamp.to_le_bytes());
-        
+
         for tx in &batch.transactions {
             hasher.update(tx.from.as_bytes());
             hasher.update(tx.to.as_bytes());
             hasher.update(&tx.amount.to_le_bytes());
         }
-        
+
         let result = hasher.finalize();
         Ok(format!("0x{:x}", result))
     }
@@ -283,21 +286,23 @@ impl BatchCompressor {
         // Serialize batch to JSON
         let json_data = serde_json::to_string(batch)
             .map_err(|e| RollupError::SerializationError(e.to_string()))?;
-        
+
         // In a real implementation, we would use actual compression algorithms
         // For now, we'll just convert to bytes
         Ok(json_data.into_bytes())
     }
 
     /// Decompress batch data
-    pub fn decompress_batch(&self, compressed_data: Vec<u8>) -> Result<TransactionBatch, RollupError> {
+    pub fn decompress_batch(
+        &self,
+        compressed_data: Vec<u8>,
+    ) -> Result<TransactionBatch, RollupError> {
         // Convert bytes back to string
         let json_data = String::from_utf8(compressed_data)
             .map_err(|e| RollupError::SerializationError(e.to_string()))?;
-        
+
         // Deserialize JSON to batch
-        serde_json::from_str(&json_data)
-            .map_err(|e| RollupError::SerializationError(e.to_string()))
+        serde_json::from_str(&json_data).map_err(|e| RollupError::SerializationError(e.to_string()))
     }
 
     /// Estimate compressed size

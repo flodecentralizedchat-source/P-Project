@@ -18,7 +18,9 @@ impl std::fmt::Display for TreasuryError {
         match self {
             TreasuryError::InsufficientFunds => write!(f, "Insufficient funds in treasury"),
             TreasuryError::InvalidAmount => write!(f, "Amount must be positive"),
-            TreasuryError::TokenOperationFailed(msg) => write!(f, "Token operation failed: {}", msg),
+            TreasuryError::TokenOperationFailed(msg) => {
+                write!(f, "Token operation failed: {}", msg)
+            }
             TreasuryError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
             TreasuryError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
         }
@@ -52,8 +54,8 @@ pub struct Treasury {
     total_buybacks: f64,
     dao_controlled: bool,
     // New fields for multi-sig approval
-    multisig_signers: Vec<String>,     // List of authorized signers
-    multisig_required: usize,          // Number of signatures required
+    multisig_signers: Vec<String>, // List of authorized signers
+    multisig_required: usize,      // Number of signatures required
     pending_transactions: HashMap<String, PendingTransaction>, // tx_id -> transaction
 }
 
@@ -66,7 +68,7 @@ pub struct PendingTransaction {
     pub asset: String,
     pub destination: String,
     pub creator: String,
-    pub signatures: Vec<String>,       // List of signers who approved
+    pub signatures: Vec<String>, // List of signers who approved
     pub created_at: NaiveDateTime,
     pub executed: bool,
 }
@@ -183,11 +185,11 @@ impl Treasury {
                 Some(tx) => tx,
                 None => return Err(TreasuryError::InvalidAmount), // Transaction not found
             };
-            
+
             if pending_tx.executed {
                 return Err(TreasuryError::InvalidAmount); // Already executed
             }
-            
+
             (pending_tx.asset.clone(), pending_tx.amount)
         };
 
@@ -197,12 +199,9 @@ impl Treasury {
         if current_balance < amount {
             return Err(TreasuryError::InsufficientFunds);
         }
-        
+
         // Deduct funds from treasury
-        self.reserves.insert(
-            asset_name, 
-            current_balance - amount
-        );
+        self.reserves.insert(asset_name, current_balance - amount);
 
         // Mark as executed
         if let Some(pending_tx) = self.pending_transactions.get_mut(tx_id) {
@@ -255,11 +254,12 @@ impl Treasury {
         };
 
         self.allocations.push(allocation);
-        
+
         // Deduct from reserves
         let current_balance = self.get_balance("USD");
-        self.reserves.insert("USD".to_string(), current_balance - amount);
-        
+        self.reserves
+            .insert("USD".to_string(), current_balance - amount);
+
         Ok(())
     }
 
@@ -295,7 +295,8 @@ impl Treasury {
 
         // Deduct funds from treasury
         let current_balance = self.get_balance("USD");
-        self.reserves.insert("USD".to_string(), current_balance - amount_to_spend);
+        self.reserves
+            .insert("USD".to_string(), current_balance - amount_to_spend);
 
         // Burn the tokens to reduce supply (deflationary mechanism)
         // In a real implementation, we would acquire tokens and burn them
@@ -305,7 +306,7 @@ impl Treasury {
                     "Treasury bought and burned {} tokens at ${} each, spending ${}",
                     tokens_to_buy, current_token_price, amount_to_spend
                 );
-            },
+            }
             Err(e) => {
                 println!("Warning: Failed to burn tokens: {}", e);
             }

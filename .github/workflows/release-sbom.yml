@@ -1,0 +1,78 @@
+name: Release SBOMs
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  attach-sboms:
+    name: Build and attach SBOMs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build runtime images
+        run: |
+          docker build --pull --target api-runtime -t pproject-api:release .
+          docker build --pull --target web-static -t pproject-web:release .
+          docker build --pull --target bridge-relayer-runtime -t pproject-bridge:release .
+          docker build --pull --target airdrop-cron-runtime -t pproject-airdrop-cron:release .
+
+      - name: Generate SBOM (repo)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom-repo.spdx.json
+          upload-artifact: false
+
+      - name: Generate SBOM (API)
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-api:release
+          format: spdx-json
+          output-file: sbom-api.spdx.json
+          upload-artifact: false
+
+      - name: Generate SBOM (Web)
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-web:release
+          format: spdx-json
+          output-file: sbom-web.spdx.json
+          upload-artifact: false
+
+      - name: Generate SBOM (Bridge)
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-bridge:release
+          format: spdx-json
+          output-file: sbom-bridge.spdx.json
+          upload-artifact: false
+
+      - name: Generate SBOM (Airdrop Cron)
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-airdrop-cron:release
+          format: spdx-json
+          output-file: sbom-airdrop.spdx.json
+          upload-artifact: false
+
+      - name: Upload SBOMs to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sbom-repo.spdx.json
+            sbom-api.spdx.json
+            sbom-web.spdx.json
+            sbom-bridge.spdx.json
+            sbom-airdrop.spdx.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

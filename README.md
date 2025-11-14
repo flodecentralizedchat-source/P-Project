@@ -4,6 +4,10 @@
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![Build Status](https://img.shields.io/github/workflow/status/flodecentralizedchat-source/P-Project/CI)](https://github.com/flodecentralizedchat-source/P-Project/actions)
 
+[![Static Web Image](https://img.shields.io/badge/GHCR-p--project--web--static-0A66?logo=github)](https://github.com/orgs/flodecentralizedchat-source/packages/container/package/p-project-web-static)
+[![Web Static CI](https://github.com/flodecentralizedchat-source/P-Project/actions/workflows/web-static.yml/badge.svg)](https://github.com/flodecentralizedchat-source/P-Project/actions/workflows/web-static.yml)
+[![API Health](https://github.com/flodecentralizedchat-source/P-Project/actions/workflows/api-health.yml/badge.svg)](https://github.com/flodecentralizedchat-source/P-Project/actions/workflows/api-health.yml)
+
 Welcome to P-Project, a cutting-edge social impact ecosystem built with Rust, WebAssembly, and modern blockchain technologies. What started as a meme coin has evolved into a comprehensive platform for humanitarian aid, social verification, and community-driven governance.
 
 ## 🚀 Project Overview
@@ -99,6 +103,50 @@ cargo test
 ```bash
 cargo doc --open
 ```
+
+## Static Web Image (GHCR)
+
+Prebuilt NGINX image (with Brotli and precompressed assets) is published to GHCR:
+
+- Image: `ghcr.io/flodecentralizedchat-source/p-project-web-static:latest`
+- Package page: https://github.com/orgs/flodecentralizedchat-source/packages/container/package/p-project-web-static
+
+Pull and run locally:
+
+```bash
+docker pull ghcr.io/flodecentralizedchat-source/p-project-web-static:latest
+docker run -p 8080:80 ghcr.io/flodecentralizedchat-source/p-project-web-static:latest
+# open http://localhost:8080
+```
+
+Use in `docker-compose.yml` instead of building:
+
+```yaml
+services:
+  nginx:
+    image: ghcr.io/flodecentralizedchat-source/p-project-web-static:latest
+    container_name: p_project_nginx
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+```
+
+Notes:
+- The image proxies API requests to `/api/` and serves the SPA from `/`.
+- If the image is private, ensure the GHCR package visibility is set to public or log in: `echo $PAT | docker login ghcr.io -u USERNAME --password-stdin`.
+
+## Docker Compose Profiles
+
+- Full stack (API + DBs + NGINX):
+  - `docker compose up --build -d`
+  - NGINX at `http://localhost:8080`, API at `http://localhost:3000`
+
+- Static web only (no API dependency):
+  - `docker compose --profile web up --build -d web-static`
+  - Opens `http://localhost:8080` and serves the SPA; `/api/` routes will 502 if called (API not started).
 
 ## 🧪 Core Components
 
@@ -220,6 +268,15 @@ P-Project prioritizes security through:
 - **Liquidity Lock**: LP tokens locked for 1-2 years
 - **Renounced Ownership**: Optional for full decentralization
 - **Transparency Dashboard**: Live token distribution and burn tracking
+
+### Security and Auth Setup
+
+- Set required environment variables (see `.env.example`) and copy to `.env`.
+- JWT auth is required for sensitive endpoints. Generate a token offline:
+  - `cargo run -p p-project-api --bin dev_token -- sub=<user_id_or_wallet> hours=24 role=admin`
+  - Use the token with `Authorization: Bearer <token>`.
+- Configure CORS with `CORS_ALLOWED_ORIGINS` and `CORS_ALLOW_CREDENTIALS`.
+- Request guardrails (enabled by default): 128 concurrent requests, 30s timeout, 1MB body limit.
 
 ## 🤓 Meet Professor P
 

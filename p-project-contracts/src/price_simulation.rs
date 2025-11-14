@@ -63,11 +63,7 @@ impl PriceSimulation {
     }
 
     /// Update the simulation with new parameters
-    pub fn update_simulation(
-        &mut self,
-        unlocked_percentage: f64,
-        target_market_cap: f64,
-    ) -> f64 {
+    pub fn update_simulation(&mut self, unlocked_percentage: f64, target_market_cap: f64) -> f64 {
         self.unlocked_percentage = unlocked_percentage;
         self.target_market_cap = target_market_cap;
         self.implied_price = Self::calculate_implied_price(target_market_cap, self.unlocked_tokens);
@@ -116,8 +112,9 @@ impl CompletePriceSimulation {
         target_market_cap: f64,
     ) -> PriceSimulation {
         let unlocked_tokens = self.total_supply * (unlocked_percentage / 100.0);
-        let implied_price = PriceSimulation::calculate_implied_price(target_market_cap, unlocked_tokens);
-        
+        let implied_price =
+            PriceSimulation::calculate_implied_price(target_market_cap, unlocked_tokens);
+
         PriceSimulation::new(
             0, // Custom simulation
             unlocked_percentage,
@@ -140,7 +137,7 @@ mod tests {
     #[test]
     fn test_price_simulation_creation() {
         let simulation = PriceSimulation::new(1, 25.0, 87500000.0, 14000000.0, 0.16);
-        
+
         assert_eq!(simulation.get_year(), 1);
         assert_eq!(simulation.get_unlocked_percentage(), 25.0);
         assert_eq!(simulation.get_unlocked_tokens(), 87500000.0);
@@ -158,7 +155,7 @@ mod tests {
     fn test_simulation_update() {
         let mut simulation = PriceSimulation::new(1, 25.0, 87500000.0, 14000000.0, 0.16);
         let new_price = simulation.update_simulation(30.0, 20000000.0);
-        
+
         assert_eq!(simulation.get_unlocked_percentage(), 30.0);
         assert_eq!(simulation.get_target_market_cap(), 20000000.0);
         // The unlocked tokens should remain the same (87,500,000)
@@ -172,10 +169,10 @@ mod tests {
     fn test_complete_price_simulation() {
         let total_supply = 350000000.0;
         let complete_simulation = CompletePriceSimulation::new(total_supply);
-        
+
         assert_eq!(complete_simulation.get_total_supply(), total_supply);
         assert_eq!(complete_simulation.get_simulations().len(), 5);
-        
+
         let year_1_simulation = complete_simulation.get_simulation_for_year(1).unwrap();
         assert_eq!(year_1_simulation.get_unlocked_percentage(), 25.0);
         assert_eq!(year_1_simulation.get_unlocked_tokens(), total_supply * 0.25);
@@ -185,11 +182,14 @@ mod tests {
     fn test_custom_simulation() {
         let total_supply = 350000000.0;
         let complete_simulation = CompletePriceSimulation::new(total_supply);
-        
+
         let custom_simulation = complete_simulation.calculate_custom_simulation(30.0, 25000000.0);
         assert_eq!(custom_simulation.get_unlocked_percentage(), 30.0);
         assert_eq!(custom_simulation.get_unlocked_tokens(), total_supply * 0.30);
         assert_eq!(custom_simulation.get_target_market_cap(), 25000000.0);
-        assert_eq!(custom_simulation.get_implied_price(), 25000000.0 / (total_supply * 0.30));
+        assert_eq!(
+            custom_simulation.get_implied_price(),
+            25000000.0 / (total_supply * 0.30)
+        );
     }
 }

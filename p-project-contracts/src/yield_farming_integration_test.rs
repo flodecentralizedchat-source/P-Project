@@ -16,14 +16,14 @@ mod tests {
         // Step 2: Initialize user balances
         let users = vec!["user1", "user2", "user3"];
         let initial_balance = 100000.0;
-        
+
         for user in &users {
             let allocations_a = vec![(user.to_string(), initial_balance)];
             token_a.initialize_distribution(allocations_a);
-            
+
             let allocations_b = vec![(user.to_string(), initial_balance)];
             token_b.initialize_distribution(allocations_b);
-            
+
             let allocations_reward = vec![(user.to_string(), initial_balance)];
             reward_token.initialize_distribution(allocations_reward);
         }
@@ -36,7 +36,7 @@ mod tests {
             0.003, // 0.3% fee
             "REWARD".to_string(),
             50000.0, // 50,000 reward tokens allocated
-            0.15, // 15% APR
+            0.15,    // 15% APR
         );
 
         // Step 4: Users add liquidity
@@ -204,14 +204,17 @@ mod tests {
 
         // Calculate projected yield for 1000 tokens over 365 days
         let projected_yield = pool.calculate_projected_yield(1000.0, 365.0);
-        
+
         // With 10% APR and daily compounding, we should get approximately 10%
         // The exact value with daily compounding is: 1000 * (1 + 0.10/365)^365 - 1000
         // Which is approximately 105.15
         assert!(projected_yield > 100.0);
         assert!(projected_yield < 110.0);
 
-        println!("Yield calculation accuracy test passed! Projected yield: {}", projected_yield);
+        println!(
+            "Yield calculation accuracy test passed! Projected yield: {}",
+            projected_yield
+        );
     }
 
     #[test]

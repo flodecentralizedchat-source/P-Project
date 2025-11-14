@@ -1,0 +1,84 @@
+name: SBOM
+
+on:
+  push:
+    branches: [ main, clean-branch ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '45 3 * * 0'
+
+jobs:
+  generate-sbom:
+    name: Generate SBOMs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API runtime image (no push)
+        run: |
+          docker build --pull --target api-runtime -t pproject-api:ci .
+
+      - name: Build Web static image (no push)
+        run: |
+          docker build --pull --target web-static -t pproject-web:ci .
+
+      - name: Build Bridge relayer image (no push)
+        run: |
+          docker build --pull --target bridge-relayer-runtime -t pproject-bridge:ci .
+
+      - name: Build Airdrop cron image (no push)
+        run: |
+          docker build --pull --target airdrop-cron-runtime -t pproject-airdrop-cron:ci .
+
+      - name: SBOM for repository (source)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom-repo.spdx.json
+          upload-artifact: true
+
+      - name: SBOM for API image
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-api:ci
+          format: spdx-json
+          output-file: sbom-api.spdx.json
+          upload-artifact: true
+
+      - name: SBOM for Web image
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-web:ci
+          format: spdx-json
+          output-file: sbom-web.spdx.json
+          upload-artifact: true
+
+      - name: SBOM for Bridge image
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-bridge:ci
+          format: spdx-json
+          output-file: sbom-bridge.spdx.json
+          upload-artifact: true
+
+      - name: SBOM for Airdrop Cron image
+        uses: anchore/sbom-action@v0
+        with:
+          image: pproject-airdrop-cron:ci
+          format: spdx-json
+          output-file: sbom-airdrop.spdx.json
+          upload-artifact: true
+

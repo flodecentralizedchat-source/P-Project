@@ -56,7 +56,12 @@ impl L2CrossChainProtocol {
     }
 
     /// Lock tokens for cross-chain transfer
-    pub fn lock_tokens(&mut self, user: String, token: String, amount: f64) -> Result<String, RollupError> {
+    pub fn lock_tokens(
+        &mut self,
+        user: String,
+        token: String,
+        amount: f64,
+    ) -> Result<String, RollupError> {
         // Check user balance
         let user_balance = self.rollup.get_balance(&user);
         if user_balance < amount {
@@ -74,7 +79,9 @@ impl L2CrossChainProtocol {
         // In a real implementation, we would update the rollup state
         // For now, we'll just track the locked tokens
         let current_locked = self.bridge_state.locked_tokens.get(&token).unwrap_or(&0.0);
-        self.bridge_state.locked_tokens.insert(token.clone(), current_locked + amount);
+        self.bridge_state
+            .locked_tokens
+            .insert(token.clone(), current_locked + amount);
 
         Ok(lock_id)
     }
@@ -119,9 +126,16 @@ impl L2CrossChainProtocol {
     }
 
     /// Process incoming cross-chain message
-    pub fn process_incoming_message(&mut self, message: CrossChainMessage) -> Result<(), RollupError> {
+    pub fn process_incoming_message(
+        &mut self,
+        message: CrossChainMessage,
+    ) -> Result<(), RollupError> {
         // Check if message was already processed
-        if self.bridge_state.processed_messages.contains_key(&message.message_id) {
+        if self
+            .bridge_state
+            .processed_messages
+            .contains_key(&message.message_id)
+        {
             return Err(RollupError::InvalidTransaction);
         }
 
@@ -131,7 +145,7 @@ impl L2CrossChainProtocol {
 
         // Mint tokens to recipient
         let recipient_balance = self.rollup.get_balance(&message.recipient);
-        
+
         // Create a transaction to mint tokens
         let transaction = L2Transaction {
             from: "bridge".to_string(), // Special bridge address
@@ -146,19 +160,28 @@ impl L2CrossChainProtocol {
         self.rollup.add_transaction(transaction)?;
 
         // Mark message as processed
-        self.bridge_state.processed_messages.insert(message.message_id, true);
+        self.bridge_state
+            .processed_messages
+            .insert(message.message_id, true);
 
         Ok(())
     }
 
     /// Release locked tokens (in case of failed transfer)
-    pub fn release_tokens(&mut self, user: String, token: String, amount: f64) -> Result<(), RollupError> {
+    pub fn release_tokens(
+        &mut self,
+        user: String,
+        token: String,
+        amount: f64,
+    ) -> Result<(), RollupError> {
         let current_locked = self.bridge_state.locked_tokens.get(&token).unwrap_or(&0.0);
         if *current_locked < amount {
             return Err(RollupError::InsufficientBalance);
         }
 
-        self.bridge_state.locked_tokens.insert(token.clone(), current_locked - amount);
+        self.bridge_state
+            .locked_tokens
+            .insert(token.clone(), current_locked - amount);
 
         // Add tokens back to user balance
         let transaction = L2Transaction {
@@ -199,10 +222,10 @@ impl L2CrossChainProtocol {
         // In a real implementation, we would verify the cryptographic signature
         // and check that the message matches the lock event on the source chain
         // For now, we'll just do a basic validation
-        
-        !message.sender.is_empty() && 
-        !message.recipient.is_empty() && 
-        message.amount > 0.0 &&
-        !message.token.is_empty()
+
+        !message.sender.is_empty()
+            && !message.recipient.is_empty()
+            && message.amount > 0.0
+            && !message.token.is_empty()
     }
 }

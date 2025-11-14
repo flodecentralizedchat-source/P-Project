@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Extension},
     http::StatusCode,
     Json,
 };
@@ -8,7 +8,10 @@ use p_project_core::database::{BalanceError, MySqlDatabase};
 use p_project_core::models::{Proposal, ProposalStatus, TransactionType, User};
 use p_project_core::{AIService, AIServiceConfig, IoTService, IoTServiceConfig, Web2Service, Web2ServiceConfig};
 use serde::{Deserialize, Serialize};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use std::sync::Arc;
+use std::env;
 
 use crate::shared::AppState;
 
@@ -18,6 +21,82 @@ pub async fn root() -> Json<serde_json::Value> {
         "name": "p-project-api",
         "status": "ok"
     }))
+}
+
+// --- Config helpers ---
+fn env_ai_config() -> Result<AIServiceConfig, String> {
+    let api_key = env::var("AI_API_KEY").map_err(|_| "AI_API_KEY not set".to_string())?;
+    let model = env::var("AI_MODEL").unwrap_or_else(|_| "gpt-4".to_string());
+    let temperature: f32 = env::var("AI_TEMPERATURE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.7);
+    Ok(AIServiceConfig {
+        api_key,
+        model,
+        temperature,
+    })
+}
+
+fn env_iot_config() -> Result<IoTServiceConfig, String> {
+    let api_endpoint = env::var("IOT_API_ENDPOINT")
+        .map_err(|_| "IOT_API_ENDPOINT not set".to_string())?;
+    let auth_token = env::var("IOT_AUTH_TOKEN").map_err(|_| "IOT_AUTH_TOKEN not set".to_string())?;
+    Ok(IoTServiceConfig {
+        api_endpoint,
+        auth_token,
+    })
+}
+
+fn env_web2_config() -> Result<Web2ServiceConfig, String> {
+    // Collect API keys if present; optional
+    let mut api_keys = std::collections::HashMap::new();
+    if let Ok(v) = env::var("WEB2_FACEBOOK_KEY") { api_keys.insert("facebook".to_string(), v); }
+    if let Ok(v) = env::var("WEB2_YOUTUBE_KEY") { api_keys.insert("youtube".to_string(), v); }
+    if let Ok(v) = env::var("WEB2_TELEGRAM_KEY") { api_keys.insert("telegram".to_string(), v); }
+    if let Ok(v) = env::var("WEB2_DISCORD_KEY") { api_keys.insert("discord".to_string(), v); }
+    let webhook_url = env::var("WEB2_WEBHOOK_URL").unwrap_or_else(|_| "".to_string());
+    Ok(Web2ServiceConfig { api_keys, webhook_url })
+}
+
+fn ensure_roles(claims: &crate::middleware::Claims, allowed: &[&str]) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let role = claims.role.as_deref().unwrap_or("user");
+    if allowed.iter().any(|r| *r == role) {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "forbidden".to_string(),
+            }),
+        ))
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct WhoAmIResponse {
+    pub sub: String,
+    pub role: Option<String>,
+    pub exp: usize,
+}
+
+pub async fn whoami(headers: axum::http::HeaderMap) -> Result<Json<WhoAmIResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let secret = std::env::var("JWT_SECRET")
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "unauthorized".to_string() })))?;
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token = auth.strip_prefix("Bearer ").unwrap_or("").trim();
+    if token.is_empty() {
+        return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "unauthorized".to_string() })));
+    }
+    let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    let key = jsonwebtoken::DecodingKey::from_secret(secret.as_bytes());
+    let data = jsonwebtoken::decode::<crate::middleware::Claims>(token, &key, &validation)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "unauthorized".to_string() })))?;
+    let c = data.claims;
+    Ok(Json(WhoAmIResponse { sub: c.sub, role: c.role, exp: c.exp }))
 }
 
 // Users
@@ -108,7 +187,7 @@ pub async fn update_user(
 pub struct TransferRequest {
     pub from_user_id: String,
     pub to_user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
 }
 
 #[derive(Debug, Serialize)]
@@ -116,14 +195,16 @@ pub struct TransferResponse {
     pub transaction_id: String,
     pub from_user_id: String,
     pub to_user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
 }
 
 pub async fn transfer_tokens(
     State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<TransferRequest>,
 ) -> Result<Json<TransferResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if req.amount <= 0.0 {
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    if req.amount <= Decimal::ZERO {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -138,7 +219,7 @@ pub async fn transfer_tokens(
             &tx_id,
             &req.from_user_id,
             &req.to_user_id,
-            req.amount,
+            req.amount.round_dp(8),
             TransactionType::Transfer,
         )
         .await
@@ -147,7 +228,7 @@ pub async fn transfer_tokens(
             transaction_id: tx_id,
             from_user_id: req.from_user_id,
             to_user_id: req.to_user_id,
-            amount: req.amount,
+            amount: req.amount.round_dp(8),
         })),
         Err(BalanceError::InvalidAmount) => Err((
             StatusCode::BAD_REQUEST,
@@ -178,24 +259,26 @@ pub async fn transfer_tokens(
 #[derive(Debug, Deserialize)]
 pub struct StakeRequest {
     pub user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
     pub duration_days: i64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct StakingInfoResponse {
     pub user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
     pub start_time: String,
     pub end_time: Option<String>,
-    pub rewards_earned: f64,
+    pub rewards_earned: Decimal,
 }
 
 pub async fn stake_tokens(
     State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<StakeRequest>,
 ) -> Result<Json<StakingInfoResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if req.amount <= 0.0 {
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    if req.amount <= Decimal::ZERO {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -206,7 +289,7 @@ pub async fn stake_tokens(
     let stake_id = p_project_core::utils::generate_id();
     match state
         .db
-        .stake_tokens(&stake_id, &req.user_id, req.amount, req.duration_days)
+        .stake_tokens(&stake_id, &req.user_id, req.amount.round_dp(8), req.duration_days)
         .await
     {
         Ok(info) => Ok(Json(StakingInfoResponse {
@@ -248,8 +331,10 @@ pub struct UnstakeRequest {
 
 pub async fn unstake_tokens(
     State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<UnstakeRequest>,
 ) -> Result<Json<StakingInfoResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"]) ?;
     match state.db.unstake_tokens(&req.user_id, None).await {
         Ok(info) => Ok(Json(StakingInfoResponse {
             user_id: info.user_id,
@@ -274,14 +359,14 @@ pub async fn unstake_tokens(
 // Airdrop
 #[derive(Debug, Deserialize)]
 pub struct CreateAirdropRequest {
-    pub total_amount: f64,
+    pub total_amount: Decimal,
     pub recipients: Option<Vec<RecipientAmount>>, // optional batch insert
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RecipientAmount {
     pub user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
 }
 
 #[derive(Debug, Serialize)]
@@ -293,7 +378,7 @@ pub async fn create_airdrop(
     State(state): State<AppState>,
     Json(req): Json<CreateAirdropRequest>,
 ) -> Result<Json<CreateAirdropResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if req.total_amount <= 0.0 {
+    if req.total_amount <= Decimal::ZERO {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -304,12 +389,15 @@ pub async fn create_airdrop(
     let airdrop_id = p_project_core::utils::generate_id();
     state
         .db
-        .create_airdrop(&airdrop_id, req.total_amount, None, None)
+        .create_airdrop(&airdrop_id, req.total_amount.round_dp(8), None, None)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e.to_string() })))?;
 
     if let Some(list) = req.recipients.clone() {
-        let vec_pairs: Vec<(String, f64)> = list.into_iter().map(|r| (r.user_id, r.amount)).collect();
+        let vec_pairs: Vec<(String, Decimal)> = list
+            .into_iter()
+            .map(|r| (r.user_id, r.amount.round_dp(8)))
+            .collect();
         state
             .db
             .add_airdrop_recipients(&airdrop_id, &vec_pairs, Some("default"))
@@ -335,7 +423,7 @@ pub struct ClaimAirdropRequest {
 pub struct AirdropClaimResponse {
     pub airdrop_id: String,
     pub user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
     pub message: String,
 }
 
@@ -400,7 +488,7 @@ pub struct BridgeRequest {
     pub user_id: String,
     pub from_chain: String,
     pub to_chain: String,
-    pub amount: f64,
+    pub amount: Decimal,
 }
 
 #[derive(Debug, Serialize)]
@@ -410,9 +498,11 @@ pub struct BridgeResponse {
 
 pub async fn bridge_tokens(
     State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<BridgeRequest>,
 ) -> Result<Json<BridgeResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if req.amount <= 0.0 {
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    if req.amount <= Decimal::ZERO {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -422,7 +512,7 @@ pub async fn bridge_tokens(
     }
     let svc = BridgeService::new(state.db.clone());
     match svc
-        .bridge_tokens(&req.user_id, &req.from_chain, &req.to_chain, req.amount)
+        .bridge_tokens(&req.user_id, &req.from_chain, &req.to_chain, req.amount.round_dp(8).to_f64().unwrap_or(0.0))
         .await
     {
         Ok(tx_id) => Ok(Json(BridgeResponse { transaction_id: tx_id })),
@@ -444,7 +534,7 @@ pub struct BridgeStatusResponse {
     pub status: String,
     pub from_chain: String,
     pub to_chain: String,
-    pub amount: f64,
+    pub amount: Decimal,
 }
 
 pub async fn get_bridge_status(
@@ -458,7 +548,7 @@ pub async fn get_bridge_status(
             status: s.status,
             from_chain: s.from_chain,
             to_chain: s.to_chain,
-            amount: s.amount,
+            amount: Decimal::from_f64(s.amount).unwrap_or(Decimal::ZERO),
         })),
         Err(_e) => Err((
             StatusCode::NOT_FOUND,
@@ -476,21 +566,21 @@ pub async fn get_performance_metrics() -> Json<serde_json::Value> {
 
 #[derive(Debug, Deserialize)]
 pub struct StakingYieldRequest {
-    pub amount: f64,
+    pub amount: Decimal,
     pub duration_days: i64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct StakingYieldResponse {
-    pub projected_rewards: f64,
-    pub total_return: f64,
+    pub projected_rewards: Decimal,
+    pub total_return: Decimal,
     pub apy_rate: f64,
 }
 
 pub async fn calculate_staking_yield(
     Json(req): Json<StakingYieldRequest>,
 ) -> Result<Json<StakingYieldResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if req.amount <= 0.0 || req.duration_days <= 0 {
+    if req.amount <= Decimal::ZERO || req.duration_days <= 0 {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -506,11 +596,13 @@ pub async fn calculate_staking_yield(
     } else {
         0.05
     };
-    let projected_rewards = req.amount * apy_rate * (req.duration_days as f64 / 365.0);
+    let projected_rewards = Decimal::from_f64(apy_rate).unwrap_or(Decimal::ZERO)
+        * req.amount
+        * Decimal::from_f64(req.duration_days as f64 / 365.0).unwrap_or(Decimal::ZERO);
     let total_return = req.amount + projected_rewards;
     Ok(Json(StakingYieldResponse {
-        projected_rewards,
-        total_return,
+        projected_rewards: projected_rewards.round_dp(8),
+        total_return: total_return.round_dp(8),
         apy_rate,
     }))
 }
@@ -587,8 +679,10 @@ pub struct CreateProposalResponse {
 
 pub async fn create_proposal(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<CreateProposalRequest>,
 ) -> Result<Json<CreateProposalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"]) ?;
     let proposal_id = p_project_core::utils::generate_id();
     Ok(Json(CreateProposalResponse { proposal_id }))
 }
@@ -607,8 +701,10 @@ pub struct VoteProposalResponse {
 
 pub async fn vote_on_proposal(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<VoteProposalRequest>,
 ) -> Result<Json<VoteProposalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"]) ?;
     Ok(Json(VoteProposalResponse {
         message: "Vote recorded successfully".to_string(),
     }))
@@ -627,8 +723,10 @@ pub struct TallyVotesResponse {
 
 pub async fn tally_votes(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<TallyVotesRequest>,
 ) -> Result<Json<TallyVotesResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["governance", "admin"]) ?;
     Ok(Json(TallyVotesResponse {
         status: "success".to_string(),
         message: "Votes tallied successfully".to_string(),
@@ -647,8 +745,10 @@ pub struct ExecuteProposalResponse {
 
 pub async fn execute_proposal(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<ExecuteProposalRequest>,
 ) -> Result<Json<ExecuteProposalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["governance", "admin"]) ?;
     Ok(Json(ExecuteProposalResponse {
         message: "Proposal executed successfully".to_string(),
     }))
@@ -667,8 +767,10 @@ pub struct DelegateVoteResponse {
 
 pub async fn delegate_vote(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<DelegateVoteRequest>,
 ) -> Result<Json<DelegateVoteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"]) ?;
     Ok(Json(DelegateVoteResponse {
         message: "Vote delegation set successfully".to_string(),
     }))
@@ -711,12 +813,8 @@ pub async fn verify_impact(
     State(_state): State<AppState>,
     Json(req): Json<ImpactVerificationRequest>,
 ) -> Result<Json<ImpactVerificationResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize AI service
-    let ai_config = AIServiceConfig {
-        api_key: "test_key".to_string(), // In production, get from environment variables
-        model: "gpt-4".to_string(),
-        temperature: 0.7,
-    };
+    // Initialize AI service from env
+    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let ai_service = AIService::new(ai_config);
     
     // Convert handler request to core request
@@ -766,12 +864,8 @@ pub async fn generate_peace_nft_art(
     State(_state): State<AppState>,
     Json(req): Json<AINFTArtRequest>,
 ) -> Result<Json<AINFTArtResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize AI service
-    let ai_config = AIServiceConfig {
-        api_key: "test_key".to_string(), // In production, get from environment variables
-        model: "dall-e".to_string(),
-        temperature: 0.7,
-    };
+    // Initialize AI service from env
+    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let ai_service = AIService::new(ai_config);
     
     // Convert handler request to core request
@@ -818,12 +912,8 @@ pub async fn detect_fraud(
     State(_state): State<AppState>,
     Json(req): Json<FraudDetectionRequest>,
 ) -> Result<Json<FraudDetectionResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize AI service
-    let ai_config = AIServiceConfig {
-        api_key: "test_key".to_string(), // In production, get from environment variables
-        model: "fraud-detection-model".to_string(),
-        temperature: 0.7,
-    };
+    // Initialize AI service from env
+    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let ai_service = AIService::new(ai_config);
     
     // Convert handler request to core request
@@ -874,12 +964,8 @@ pub async fn generate_ai_meme(
     State(_state): State<AppState>,
     Json(req): Json<AIMemeRequest>,
 ) -> Result<Json<AIMemeResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize AI service
-    let ai_config = AIServiceConfig {
-        api_key: "test_key".to_string(), // In production, get from environment variables
-        model: "dall-e-meme".to_string(),
-        temperature: 0.7,
-    };
+    // Initialize AI service from env
+    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let ai_service = AIService::new(ai_config);
     
     // Convert handler request to core request
@@ -924,13 +1010,13 @@ pub struct RegisterDonationBoxResponse {
 
 pub async fn register_donation_box(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<RegisterDonationBoxRequest>,
 ) -> Result<Json<RegisterDonationBoxResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    ensure_roles(&claims, &["admin"]) ?;
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut iot_service = IoTService::new(iot_config);
     
     match iot_service.register_donation_box(req.box_id, req.location, req.wallet_address) {
@@ -956,13 +1042,13 @@ pub struct RecordDonationResponse {
 
 pub async fn record_donation(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<RecordDonationRequest>,
 ) -> Result<Json<RecordDonationResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut iot_service = IoTService::new(iot_config);
     
     match iot_service.record_donation(&req.box_id, req.amount, req.donor_address) {
@@ -986,13 +1072,12 @@ pub struct GetDonationBoxStatusResponse {
 
 pub async fn get_donation_box_status(
     State(_state): State<AppState>,
+    Extension(_claims): Extension<crate::middleware::Claims>,
     Json(req): Json<GetDonationBoxStatusRequest>,
 ) -> Result<Json<GetDonationBoxStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let iot_service = IoTService::new(iot_config);
     
     let box_data = iot_service.get_donation_box_status(&req.box_id).cloned();
@@ -1016,11 +1101,9 @@ pub async fn register_wristband(
     State(_state): State<AppState>,
     Json(req): Json<RegisterWristbandRequest>,
 ) -> Result<Json<RegisterWristbandResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut iot_service = IoTService::new(iot_config);
     
     match iot_service.register_wristband(req.wristband_id, req.refugee_id, req.camp_id) {
@@ -1048,11 +1131,9 @@ pub async fn add_funds_to_wristband(
     State(_state): State<AppState>,
     Json(req): Json<AddFundsToWristbandRequest>,
 ) -> Result<Json<AddFundsToWristbandResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut iot_service = IoTService::new(iot_config);
     
     match iot_service.add_funds_to_wristband(&req.wristband_id, req.amount) {
@@ -1084,11 +1165,9 @@ pub async fn process_wristband_transaction(
     State(_state): State<AppState>,
     Json(req): Json<ProcessWristbandTransactionRequest>,
 ) -> Result<Json<ProcessWristbandTransactionResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut iot_service = IoTService::new(iot_config);
     
     match iot_service.process_wristband_transaction(&req.wristband_id, req.amount, req.transaction_type, req.vendor_id) {
@@ -1112,13 +1191,12 @@ pub struct GetWristbandStatusResponse {
 
 pub async fn get_wristband_status(
     State(_state): State<AppState>,
+    Extension(_claims): Extension<crate::middleware::Claims>,
     Json(req): Json<GetWristbandStatusRequest>,
 ) -> Result<Json<GetWristbandStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let iot_service = IoTService::new(iot_config);
     
     let wristband_data = iot_service.get_wristband_status(&req.wristband_id).cloned();
@@ -1141,13 +1219,13 @@ pub struct CreateFoodQRResponse {
 
 pub async fn create_food_qr(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<CreateFoodQRRequest>,
 ) -> Result<Json<CreateFoodQRResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    ensure_roles(&claims, &["admin"]) ?;
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut iot_service = IoTService::new(iot_config);
     
     // Parse the expiration date
@@ -1187,13 +1265,13 @@ pub struct ClaimFoodQRResponse {
 
 pub async fn claim_food_qr(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ClaimFoodQRRequest>,
 ) -> Result<Json<ClaimFoodQRResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut iot_service = IoTService::new(iot_config);
     
     let claim_request = p_project_core::QRClaimRequest {
@@ -1225,11 +1303,9 @@ pub async fn get_qr_status(
     State(_state): State<AppState>,
     Json(req): Json<GetQRStatusRequest>,
 ) -> Result<Json<GetQRStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize IoT service
-    let iot_config = IoTServiceConfig {
-        api_endpoint: "https://api.example.com".to_string(), // In production, get from environment variables
-        auth_token: "test_token".to_string(),
-    };
+    // Initialize IoT service from env
+    let iot_config = env_iot_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let iot_service = IoTService::new(iot_config);
     
     let qr_data = iot_service.get_qr_status(&req.qr_id).cloned();
@@ -1249,19 +1325,13 @@ pub struct CreateDonationWidgetResponse {
 
 pub async fn create_donation_widget(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<CreateDonationWidgetRequest>,
 ) -> Result<Json<CreateDonationWidgetResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize Web2 service
-    let mut api_keys = std::collections::HashMap::new();
-    api_keys.insert("facebook".to_string(), "fb_key".to_string());
-    api_keys.insert("youtube".to_string(), "yt_key".to_string());
-    api_keys.insert("telegram".to_string(), "tg_key".to_string());
-    api_keys.insert("discord".to_string(), "dc_key".to_string());
-    
-    let web2_config = Web2ServiceConfig {
-        api_keys,
-        webhook_url: "https://api.example.com/webhook".to_string(), // In production, get from environment variables
-    };
+    ensure_roles(&claims, &["admin"]) ?;
+    // Initialize Web2 service from env
+    let web2_config = env_web2_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut web2_service = Web2Service::new(web2_config);
     
     match web2_service.create_donation_widget(req.config) {
@@ -1285,19 +1355,13 @@ pub struct ProcessSocialMediaDonationResponse {
 
 pub async fn process_social_media_donation(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ProcessSocialMediaDonationRequest>,
 ) -> Result<Json<ProcessSocialMediaDonationResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize Web2 service
-    let mut api_keys = std::collections::HashMap::new();
-    api_keys.insert("facebook".to_string(), "fb_key".to_string());
-    api_keys.insert("youtube".to_string(), "yt_key".to_string());
-    api_keys.insert("telegram".to_string(), "tg_key".to_string());
-    api_keys.insert("discord".to_string(), "dc_key".to_string());
-    
-    let web2_config = Web2ServiceConfig {
-        api_keys,
-        webhook_url: "https://api.example.com/webhook".to_string(), // In production, get from environment variables
-    };
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    // Initialize Web2 service from env
+    let web2_config = env_web2_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let web2_service = Web2Service::new(web2_config);
     
     match web2_service.process_social_media_donation(req.donation_data).await {
@@ -1321,19 +1385,13 @@ pub struct GenerateWidgetHtmlResponse {
 
 pub async fn generate_widget_html(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<GenerateWidgetHtmlRequest>,
 ) -> Result<Json<GenerateWidgetHtmlResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize Web2 service
-    let mut api_keys = std::collections::HashMap::new();
-    api_keys.insert("facebook".to_string(), "fb_key".to_string());
-    api_keys.insert("youtube".to_string(), "yt_key".to_string());
-    api_keys.insert("telegram".to_string(), "tg_key".to_string());
-    api_keys.insert("discord".to_string(), "dc_key".to_string());
-    
-    let web2_config = Web2ServiceConfig {
-        api_keys,
-        webhook_url: "https://api.example.com/webhook".to_string(), // In production, get from environment variables
-    };
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    // Initialize Web2 service from env
+    let web2_config = env_web2_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let web2_service = Web2Service::new(web2_config);
     
     match web2_service.generate_widget_html(&req.widget_id) {
@@ -1360,19 +1418,13 @@ pub struct CreateYouTubeTipConfigResponse {
 
 pub async fn create_youtube_tip_config(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<CreateYouTubeTipConfigRequest>,
 ) -> Result<Json<CreateYouTubeTipConfigResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize Web2 service
-    let mut api_keys = std::collections::HashMap::new();
-    api_keys.insert("facebook".to_string(), "fb_key".to_string());
-    api_keys.insert("youtube".to_string(), "yt_key".to_string());
-    api_keys.insert("telegram".to_string(), "tg_key".to_string());
-    api_keys.insert("discord".to_string(), "dc_key".to_string());
-    
-    let web2_config = Web2ServiceConfig {
-        api_keys,
-        webhook_url: "https://api.example.com/webhook".to_string(), // In production, get from environment variables
-    };
+    ensure_roles(&claims, &["admin"]) ?;
+    // Initialize Web2 service from env
+    let web2_config = env_web2_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut web2_service = Web2Service::new(web2_config);
     
     match web2_service.create_youtube_tip_config(req.config) {
@@ -1400,19 +1452,13 @@ pub struct ProcessYouTubeTipResponse {
 
 pub async fn process_youtube_tip(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ProcessYouTubeTipRequest>,
 ) -> Result<Json<ProcessYouTubeTipResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize Web2 service
-    let mut api_keys = std::collections::HashMap::new();
-    api_keys.insert("facebook".to_string(), "fb_key".to_string());
-    api_keys.insert("youtube".to_string(), "yt_key".to_string());
-    api_keys.insert("telegram".to_string(), "tg_key".to_string());
-    api_keys.insert("discord".to_string(), "dc_key".to_string());
-    
-    let web2_config = Web2ServiceConfig {
-        api_keys,
-        webhook_url: "https://api.example.com/webhook".to_string(), // In production, get from environment variables
-    };
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    // Initialize Web2 service from env
+    let web2_config = env_web2_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let web2_service = Web2Service::new(web2_config);
     
     match web2_service.process_youtube_tip(req.tip_data).await {
@@ -1439,19 +1485,13 @@ pub struct RegisterMessagingBotResponse {
 
 pub async fn register_messaging_bot(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<RegisterMessagingBotRequest>,
 ) -> Result<Json<RegisterMessagingBotResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize Web2 service
-    let mut api_keys = std::collections::HashMap::new();
-    api_keys.insert("facebook".to_string(), "fb_key".to_string());
-    api_keys.insert("youtube".to_string(), "yt_key".to_string());
-    api_keys.insert("telegram".to_string(), "tg_key".to_string());
-    api_keys.insert("discord".to_string(), "dc_key".to_string());
-    
-    let web2_config = Web2ServiceConfig {
-        api_keys,
-        webhook_url: "https://api.example.com/webhook".to_string(), // In production, get from environment variables
-    };
+    ensure_roles(&claims, &["admin"]) ?;
+    // Initialize Web2 service from env
+    let web2_config = env_web2_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let mut web2_service = Web2Service::new(web2_config);
     
     match web2_service.register_messaging_bot(req.config) {
@@ -1479,19 +1519,13 @@ pub struct ProcessBotCommandResponse {
 
 pub async fn process_bot_command(
     State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ProcessBotCommandRequest>,
 ) -> Result<Json<ProcessBotCommandResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Initialize Web2 service
-    let mut api_keys = std::collections::HashMap::new();
-    api_keys.insert("facebook".to_string(), "fb_key".to_string());
-    api_keys.insert("youtube".to_string(), "yt_key".to_string());
-    api_keys.insert("telegram".to_string(), "tg_key".to_string());
-    api_keys.insert("discord".to_string(), "dc_key".to_string());
-    
-    let web2_config = Web2ServiceConfig {
-        api_keys,
-        webhook_url: "https://api.example.com/webhook".to_string(), // In production, get from environment variables
-    };
+    ensure_roles(&claims, &["user", "admin"]) ?;
+    // Initialize Web2 service from env
+    let web2_config = env_web2_config()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
     let web2_service = Web2Service::new(web2_config);
     
     match web2_service.process_bot_command(req.command_data).await {
@@ -1503,7 +1537,218 @@ pub async fn process_bot_command(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     pub error: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MerchantPaymentResponse {
+    pub transaction_id: String,
+    pub merchant_id: String,
+    pub customer_wallet: String,
+    pub amount: f64,
+    pub currency: String,
+    pub status: String,
+    pub timestamp: NaiveDateTime,
+    pub tx_hash: Option<String>,
+    pub qr_code_used: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MerchantPaymentRequest {
+    pub merchant_id: String,
+    pub customer_wallet: String,
+    pub amount: f64,
+    pub currency: String,
+    pub description: Option<String>,
+    pub qr_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateMerchantResponse {
+    pub merchant_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateMerchantRequest {
+    pub name: String,
+    pub category: String, // "coffee_shop", "restaurant", "bookstore", "clinic", "repair_shop"
+    pub wallet_address: String,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub contact_info: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateQRResponse {
+    pub qr_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateQRRequest {
+    pub merchant_id: String,
+    pub amount: f64,
+    pub currency: String,
+    pub description: Option<String>,
+    pub expires_in_seconds: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetMerchantResponse {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub wallet_address: String,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub contact_info: Option<String>,
+    pub is_verified: bool,
+    pub created_at: NaiveDateTime,
+    pub verified_at: Option<NaiveDateTime>,
+}
+
+pub async fn process_merchant_payment(
+    State(state): State<AppState>,
+    Json(req): Json<MerchantPaymentRequest>,
+) -> Result<Json<MerchantPaymentResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Initialize merchant service
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01, // 1% platform fee
+        max_transaction_amount: 10000.0, // Max 10,000 P-Coin per transaction
+    };
+    let mut merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    
+    // In a real implementation, we would load existing merchants from the database
+    // For this example, we'll just process the payment directly
+    
+    let core_request = p_project_core::merchant_service::MerchantPaymentRequest {
+        merchant_id: req.merchant_id,
+        customer_wallet: req.customer_wallet,
+        amount: req.amount,
+        currency: req.currency,
+        description: req.description,
+        qr_code: req.qr_code,
+    };
+    
+    match merchant_service.process_payment(core_request).await {
+        Ok(response) => {
+            let handler_response = MerchantPaymentResponse {
+                transaction_id: response.transaction_id,
+                merchant_id: response.merchant_id,
+                customer_wallet: response.customer_wallet,
+                amount: response.amount,
+                currency: response.currency,
+                status: response.status,
+                timestamp: response.timestamp,
+                tx_hash: response.tx_hash,
+                qr_code_used: response.qr_code_used,
+            };
+            Ok(Json(handler_response))
+        },
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: e.to_string() }),
+        )),
+    }
+}
+
+pub async fn create_merchant(
+    State(_state): State<AppState>,
+    Json(req): Json<CreateMerchantRequest>,
+) -> Result<Json<CreateMerchantResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Initialize merchant service
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let mut merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    
+    // Convert category string to enum
+    let category = match req.category.as_str() {
+        "coffee_shop" => p_project_core::merchant_service::MerchantCategory::CoffeeShop,
+        "restaurant" => p_project_core::merchant_service::MerchantCategory::Restaurant,
+        "bookstore" => p_project_core::merchant_service::MerchantCategory::Bookstore,
+        "clinic" => p_project_core::merchant_service::MerchantCategory::Clinic,
+        "repair_shop" => p_project_core::merchant_service::MerchantCategory::RepairShop,
+        _ => p_project_core::merchant_service::MerchantCategory::Other(req.category.clone()),
+    };
+    
+    match merchant_service.register_merchant(
+        req.name,
+        category,
+        req.wallet_address,
+        req.description,
+        req.location,
+        req.contact_info,
+    ) {
+        Ok(merchant_id) => {
+            let response = CreateMerchantResponse { merchant_id };
+            Ok(Json(response))
+        },
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: e.to_string() }),
+        )),
+    }
+}
+
+pub async fn create_payment_qr(
+    State(_state): State<AppState>,
+    Json(req): Json<CreateQRRequest>,
+) -> Result<Json<CreateQRResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Initialize merchant service
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let mut merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    
+    match merchant_service.create_payment_qr(
+        req.merchant_id,
+        req.amount,
+        req.currency,
+        req.description,
+        req.expires_in_seconds,
+    ) {
+        Ok(qr_id) => {
+            let response = CreateQRResponse { qr_id };
+            Ok(Json(response))
+        },
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: e.to_string() }),
+        )),
+    }
+}
+
+pub async fn get_merchant(
+    State(_state): State<AppState>,
+    Path(merchant_id): Path<String>,
+) -> Result<Json<GetMerchantResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Initialize merchant service
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    
+    // In a real implementation, we would fetch the merchant from the database
+    // For this example, we'll return a mock response
+    
+    // This is a simplified implementation - in reality, you would look up the merchant
+    let response = GetMerchantResponse {
+        id: merchant_id,
+        name: "Sample Merchant".to_string(),
+        category: "coffee_shop".to_string(),
+        wallet_address: "0x123456789abcdef".to_string(),
+        description: Some("A sample merchant for testing".to_string()),
+        location: Some("123 Main St".to_string()),
+        contact_info: Some("contact@samplemerchant.com".to_string()),
+        is_verified: true,
+        created_at: Utc::now().naive_utc(),
+        verified_at: Some(Utc::now().naive_utc()),
+    };
+    
+    Ok(Json(response))
 }

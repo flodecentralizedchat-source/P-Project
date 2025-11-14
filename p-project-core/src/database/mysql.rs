@@ -1,4 +1,5 @@
 use chrono::{NaiveDateTime, Utc};
+use rust_decimal::Decimal;
 use sqlx::MySqlPool;
 use sqlx::Row;
 use std::fmt;
@@ -263,7 +264,7 @@ impl MySqlDatabase {
     pub async fn create_airdrop(
         &self,
         airdrop_id: &str,
-        total_amount: f64,
+        total_amount: Decimal,
         start_time: Option<NaiveDateTime>,
         end_time: Option<NaiveDateTime>,
     ) -> Result<(), sqlx::Error> {
@@ -283,7 +284,7 @@ impl MySqlDatabase {
     pub async fn add_airdrop_recipients(
         &self,
         airdrop_id: &str,
-        recipients: &[(String, f64)],
+        recipients: &[(String, Decimal)],
         category: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         for (user_id, amount) in recipients {
@@ -299,7 +300,9 @@ impl MySqlDatabase {
         }
 
         // Update distributed amount in airdrop
-        let total_new_amount: f64 = recipients.iter().map(|(_, amount)| amount).sum();
+        let total_new_amount: Decimal = recipients
+            .iter()
+            .fold(Decimal::ZERO, |acc, (_, a)| acc + a.clone());
         sqlx::query("UPDATE airdrops SET distributed_amount = distributed_amount + ? WHERE id = ?")
             .bind(total_new_amount)
             .bind(airdrop_id)
@@ -309,7 +312,7 @@ impl MySqlDatabase {
         Ok(())
     }
 
-    pub async fn claim_airdrop(&self, airdrop_id: &str, user_id: &str) -> Result<f64, sqlx::Error> {
+    pub async fn claim_airdrop(&self, airdrop_id: &str, user_id: &str) -> Result<Decimal, sqlx::Error> {
         // Get the amount to claim
         let row = sqlx::query(
             r#"SELECT amount FROM airdrop_recipients WHERE airdrop_id = ? AND user_id = ? AND claimed = FALSE"#
@@ -319,7 +322,7 @@ impl MySqlDatabase {
         .fetch_one(&self.pool)
         .await?;
 
-        let amount: f64 = row.get("amount");
+        let amount: Decimal = row.get("amount");
 
         // Update claim status
         sqlx::query(
@@ -354,7 +357,7 @@ impl MySqlDatabase {
     pub async fn get_airdrop_status(
         &self,
         airdrop_id: &str,
-    ) -> Result<(f64, f64, usize, usize), sqlx::Error> {
+    ) -> Result<(Decimal, Decimal, usize, usize), sqlx::Error> {
         // Get airdrop info
         let airdrop_row =
             sqlx::query("SELECT total_amount, distributed_amount FROM airdrops WHERE id = ?")
@@ -362,8 +365,8 @@ impl MySqlDatabase {
                 .fetch_one(&self.pool)
                 .await?;
 
-        let total_amount: f64 = airdrop_row.get("total_amount");
-        let distributed_amount: f64 = airdrop_row.get("distributed_amount");
+        let total_amount: Decimal = airdrop_row.get("total_amount");
+        let distributed_amount: Decimal = airdrop_row.get("distributed_amount");
 
         // Get recipient counts
         let recipient_row = sqlx::query(
@@ -376,19 +379,14 @@ impl MySqlDatabase {
         let total_recipients: i64 = recipient_row.get("total_recipients");
         let claimed_recipients: Option<i64> = recipient_row.get("claimed_recipients");
 
-        Ok((
-            total_amount,
-            distributed_amount,
-            total_recipients as usize,
-            claimed_recipients.unwrap_or(0) as usize,
-        ))
+        Ok((total_amount, distributed_amount, total_recipients as usize, claimed_recipients.unwrap_or(0) as usize))
     }
 
     pub async fn batch_claim_airdrops(
         &self,
         airdrop_id: &str,
         user_ids: &[String],
-    ) -> Result<Vec<(String, f64)>, sqlx::Error> {
+    ) -> Result<Vec<(String, Decimal)>, sqlx::Error> {
         let mut claimed_amounts = Vec::new();
 
         for user_id in user_ids {
@@ -515,15 +513,15 @@ impl MySqlDatabase {
         }
     }
 
-    pub async fn get_balances(&self, user_id: &str) -> Result<Option<(f64, f64)>, sqlx::Error> {
+    pub async fn get_balances(&self, user_id: &str) -> Result<Option<(Decimal, Decimal)>, sqlx::Error> {
         if let Some(row) =
             sqlx::query("SELECT available_balance, staked_balance FROM balances WHERE user_id = ?")
                 .bind(user_id)
                 .fetch_optional(&self.pool)
                 .await?
         {
-            let available: f64 = row.get("available_balance");
-            let staked: f64 = row.get("staked_balance");
+            let available: Decimal = row.get("available_balance");
+            let staked: Decimal = row.get("staked_balance");
             Ok(Some((available, staked)))
         } else {
             Ok(None)
@@ -536,10 +534,10 @@ impl MySqlDatabase {
         transaction_id: &str,
         from_user_id: &str,
         to_user_id: &str,
-        amount: f64,
+        amount: Decimal,
         transaction_type: crate::models::TransactionType,
     ) -> Result<(), BalanceError> {
-        if amount <= 0.0 {
+        if amount <= Decimal::ZERO {
             return Err(BalanceError::InvalidAmount);
         }
 
@@ -555,8 +553,8 @@ impl MySqlDatabase {
         .await
         .map_err(BalanceError::Sql)?;
 
-        let from_balance = match from_balance_row {
-            Some(row) => row.get::<f64, _>("available_balance"),
+        let from_balance: Decimal = match from_balance_row {
+            Some(row) => row.get::<Decimal, _>("available_balance"),
             None => return Err(BalanceError::UserNotFound),
         };
 
@@ -626,10 +624,10 @@ impl MySqlDatabase {
         &self,
         stake_id: &str,
         user_id: &str,
-        amount: f64,
+        amount: Decimal,
         duration_days: i64,
     ) -> Result<crate::models::StakingInfo, BalanceError> {
-        if amount <= 0.0 {
+        if amount <= Decimal::ZERO {
             return Err(BalanceError::InvalidAmount);
         }
 
@@ -645,8 +643,8 @@ impl MySqlDatabase {
         .await
         .map_err(BalanceError::Sql)?;
 
-        let available_balance = match user_balance_row {
-            Some(row) => row.get::<f64, _>("available_balance"),
+        let available_balance: Decimal = match user_balance_row {
+            Some(row) => row.get::<Decimal, _>("available_balance"),
             None => return Err(BalanceError::UserNotFound),
         };
 
@@ -692,7 +690,7 @@ impl MySqlDatabase {
             amount,
             start_time,
             end_time: Some(end_time),
-            rewards_earned: 0.0,
+            rewards_earned: Decimal::ZERO,
             tier_name: None,
             is_compounding: false,
         })
@@ -732,7 +730,7 @@ impl MySqlDatabase {
         let stake_data = match stake_row {
             Some(row) => {
                 let id: String = row.get("id");
-                let amount: f64 = row.get("amount");
+                let amount: Decimal = row.get("amount");
                 let start_time: NaiveDateTime = row.get("start_time");
                 let end_time: Option<NaiveDateTime> = row.get("end_time");
                 (id, amount, start_time, end_time)
@@ -743,7 +741,7 @@ impl MySqlDatabase {
         let (stake_id_val, stake_amount, start_time, _end_time) = stake_data;
 
         // Calculate rewards (simplified - in a real implementation, this would be more complex)
-        let rewards = 0.0; // For now, no rewards
+        let rewards = Decimal::ZERO; // For now, no rewards
 
         // Update balances
         let total_return = stake_amount + rewards;

@@ -19,10 +19,7 @@ pub struct SparseMerkleTree {
 
 impl SparseMerkleTree {
     pub fn new(depth: usize) -> Self {
-        Self {
-            root: None,
-            depth,
-        }
+        Self { root: None, depth }
     }
 
     /// Insert a leaf node at the given index
@@ -99,7 +96,7 @@ impl L2StateManager {
         Self {
             accounts: HashMap::new(),
             merkle_tree: SparseMerkleTree::new(256), // 256-bit depth
-            state_root: "0".repeat(64), // Empty root
+            state_root: "0".repeat(64),              // Empty root
         }
     }
 
@@ -111,18 +108,19 @@ impl L2StateManager {
     /// Update account and merkle tree
     pub fn update_account(&mut self, account: L2Account) -> Result<(), RollupError> {
         // Update account in hashmap
-        self.accounts.insert(account.address.clone(), account.clone());
-        
+        self.accounts
+            .insert(account.address.clone(), account.clone());
+
         // Serialize account data
         let account_data = serde_json::to_string(&account)
             .map_err(|e| RollupError::SerializationError(e.to_string()))?;
-        
+
         // Insert into merkle tree
         self.merkle_tree.insert(&account.address, &account_data)?;
-        
+
         // Update state root
         self.update_state_root();
-        
+
         Ok(())
     }
 
@@ -131,17 +129,17 @@ impl L2StateManager {
         // In a real implementation, we would get the root from the merkle tree
         // For now, we'll create a simple hash of all accounts
         let mut hasher = Keccak256::new();
-        
+
         // Sort accounts by address for consistent hashing
         let mut accounts: Vec<(&String, &L2Account)> = self.accounts.iter().collect();
         accounts.sort_by(|a, b| a.0.cmp(b.0));
-        
+
         for (_, account) in accounts {
             hasher.update(account.address.as_bytes());
             hasher.update(&account.balance.to_le_bytes());
             hasher.update(&account.nonce.to_le_bytes());
         }
-        
+
         let result = hasher.finalize();
         self.state_root = format!("{:x}", result);
     }
@@ -168,12 +166,12 @@ impl L2StateManager {
             Ok(data) => data,
             Err(_) => return false,
         };
-        
+
         // Hash the account data
         let mut hasher = Keccak256::new();
         hasher.update(account_data.as_bytes());
         let account_hash = format!("{:x}", hasher.finalize());
-        
+
         // Verify the proof against the current state root
         // In a real implementation, we would reconstruct the root from the proof
         // and compare it with the current state root
@@ -212,13 +210,13 @@ impl StateSnapshot {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         // Hash all accounts
         let mut hasher = Keccak256::new();
         hasher.update(state_root.as_bytes());
         hasher.update(&block_number.to_le_bytes());
         let accounts_hash = format!("{:x}", hasher.finalize());
-        
+
         Self {
             state_root,
             block_number,
@@ -246,7 +244,7 @@ impl StateCheckpointManager {
     pub fn create_snapshot(&mut self, state_root: String, block_number: u64) {
         let snapshot = StateSnapshot::new(state_root, block_number);
         self.snapshots.push(snapshot);
-        
+
         // Keep only the latest snapshots
         if self.snapshots.len() > self.max_snapshots {
             self.snapshots.remove(0);
@@ -260,7 +258,9 @@ impl StateCheckpointManager {
 
     /// Get snapshot by block number
     pub fn get_snapshot_by_block(&self, block_number: u64) -> Option<&StateSnapshot> {
-        self.snapshots.iter().find(|s| s.block_number == block_number)
+        self.snapshots
+            .iter()
+            .find(|s| s.block_number == block_number)
     }
 
     /// Verify snapshot integrity
@@ -270,7 +270,7 @@ impl StateCheckpointManager {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         snapshot.timestamp <= current_time
     }
 }

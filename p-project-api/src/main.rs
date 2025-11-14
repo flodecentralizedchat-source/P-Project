@@ -1,30 +1,48 @@
 use axum::{
+    middleware,
     routing::{get, post},
     Router,
 };
 use p_project_core::database::MySqlDatabase;
 use std::sync::Arc;
+use tower::limit::ConcurrencyLimitLayer;
+use tower::timeout::TimeoutLayer;
+use std::time::Duration;
 
 mod handlers;
 mod middleware;
 mod shared;
+mod ratelimit;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize middleware
-    middleware::init_middleware();
+    crate::middleware::init_middleware();
 
-    // Initialize database
+    // Initialize database (env-only; fail if missing)
     let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("mysql://user:password@localhost/p_project".to_string());
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "DATABASE_URL not set"))?;
     let db = MySqlDatabase::new(&db_url).await?;
     db.init_tables().await?;
 
-    let app_state = shared::AppState { db: Arc::new(db) };
+    let app_state = shared::AppState {
+        db: Arc::new(db),
+        rate_limiter: Arc::new(crate::ratelimit::RateLimiter::from_env()),
+        strict_rate_limiter: Arc::new(crate::ratelimit::RateLimiter::from_env_with_prefix("STRICT_RATE_LIMIT_")),
+    };
 
-    // Build router
-    let app = Router::new()
+    // Build routers
+    // Public endpoints
+    let public = Router::new()
         .route("/", get(handlers::root))
+        .route("/metrics", get(handlers::get_performance_metrics))
+        .route("/staking/tiers", get(handlers::get_staking_tiers))
+        .route("/airdrop/status", get(handlers::get_airdrop_status))
+        .route("/airdrop/recipients", get(handlers::get_airdrop_recipients));
+
+    // Protected endpoints (require JWT)
+    let protected = Router::new()
+        .route("/auth/whoami", get(handlers::whoami))
         .route("/users", post(handlers::create_user))
         .route(
             "/users/:id",
@@ -34,26 +52,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/stake", post(handlers::stake_tokens))
         .route("/unstake", post(handlers::unstake_tokens))
         .route("/airdrop/claim", post(handlers::claim_airdrop))
-        .route("/airdrop/create", post(handlers::create_airdrop))
+        // admin variant provided in admin router
         .route("/airdrop/batch-claim", post(handlers::batch_claim_airdrops))
         // Bridge endpoints
         .route("/bridge", post(handlers::bridge_tokens))
         .route("/bridge/status", post(handlers::get_bridge_status))
-        // Performance metrics endpoint
-        .route("/metrics", get(handlers::get_performance_metrics))
         // DAO endpoints
         .route("/dao/proposals", post(handlers::create_proposal))
         .route("/dao/proposals/vote", post(handlers::vote_on_proposal))
         .route("/dao/proposals/tally", post(handlers::tally_votes))
         .route("/dao/proposals/execute", post(handlers::execute_proposal))
+        // admin variant provided in admin router
         .route("/dao/delegate", post(handlers::delegate_vote))
         .route("/dao/proposals", get(handlers::get_proposals))
         // Staking endpoints
         .route("/staking/yield", post(handlers::calculate_staking_yield))
-        .route("/staking/tiers", get(handlers::get_staking_tiers))
-        // Airdrop endpoints
-        .route("/airdrop/status", get(handlers::get_airdrop_status))
-        .route("/airdrop/recipients", get(handlers::get_airdrop_recipients))
         // AI Service endpoints
         .route("/ai/verify-impact", post(handlers::verify_impact))
         .route("/ai/generate-nft-art", post(handlers::generate_peace_nft_art))
@@ -65,20 +78,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/iot/donation-box-status", post(handlers::get_donation_box_status))
         .route("/iot/register-wristband", post(handlers::register_wristband))
         .route("/iot/add-funds-wristband", post(handlers::add_funds_to_wristband))
-        .route("/iot/process-wristband-transaction", post(handlers::process_wristband_transaction))
+        .route(
+            "/iot/process-wristband-transaction",
+            post(handlers::process_wristband_transaction),
+        )
         .route("/iot/wristband-status", post(handlers::get_wristband_status))
         .route("/iot/create-food-qr", post(handlers::create_food_qr))
         .route("/iot/claim-food-qr", post(handlers::claim_food_qr))
         .route("/iot/qr-status", post(handlers::get_qr_status))
         // Web2 Service endpoints
-        .route("/web2/create-donation-widget", post(handlers::create_donation_widget))
-        .route("/web2/process-social-donation", post(handlers::process_social_media_donation))
-        .route("/web2/generate-widget-html", post(handlers::generate_widget_html))
-        .route("/web2/create-youtube-tip-config", post(handlers::create_youtube_tip_config))
-        .route("/web2/process-youtube-tip", post(handlers::process_youtube_tip))
-        .route("/web2/register-messaging-bot", post(handlers::register_messaging_bot))
-        .route("/web2/process-bot-command", post(handlers::process_bot_command))
-        .with_state(app_state);
+        // admin variant provided in admin router
+        .route(
+            "/web2/process-social-donation",
+            post(handlers::process_social_media_donation),
+        )
+        .route(
+            "/web2/generate-widget-html",
+            post(handlers::generate_widget_html),
+        )
+        // admin variant provided in admin router
+        .route(
+            "/web2/process-youtube-tip",
+            post(handlers::process_youtube_tip),
+        )
+        // admin variant provided in admin router
+        .route(
+            "/web2/process-bot-command",
+            post(handlers::process_bot_command),
+        )
+        // Merchant Service endpoints
+        .route("/merchant", post(handlers::create_merchant))
+        .route("/merchant/:id", get(handlers::get_merchant))
+        .route("/merchant/payment", post(handlers::process_merchant_payment))
+        .route("/merchant/qr", post(handlers::create_payment_qr))
+
+        .route_layer(middleware::from_fn(crate::middleware::require_jwt));
+
+    // Admin-only routes
+    let admin = Router::new()
+        .route("/airdrop/create", post(handlers::create_airdrop))
+        .route(
+            "/web2/create-donation-widget",
+            post(handlers::create_donation_widget),
+        )
+        .route(
+            "/web2/create-youtube-tip-config",
+            post(handlers::create_youtube_tip_config),
+        )
+        .route(
+            "/web2/register-messaging-bot",
+            post(handlers::register_messaging_bot),
+        )
+        .route_layer(middleware::from_fn(crate::middleware::require_admin))
+        .route_layer(middleware::from_fn(crate::middleware::require_jwt));
+
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .merge(admin)
+        .with_state(app_state)
+        .layer(middleware::from_fn(crate::middleware::require_rate_limit))
+        .layer(ConcurrencyLimitLayer::new(128))
+        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        .layer(crate::middleware::build_body_limit_from_env())
+        .layer(crate::middleware::build_cors_from_env());
 
     // Run server
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;

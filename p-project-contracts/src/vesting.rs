@@ -36,7 +36,7 @@ pub struct VestingSchedule {
     pub vesting_duration_months: i64,
     pub start_date: NaiveDateTime,
     pub claimed_amount: f64,
-    pub is_linear: bool, // Linear vesting or other schedule
+    pub is_linear: bool,            // Linear vesting or other schedule
     pub schedule_type: VestingType, // Type of vesting schedule
 }
 
@@ -83,7 +83,10 @@ impl VestingContract {
 
     /// Get multisig signers for founder wallets
     pub fn get_founder_multisig_signers(&self) -> (&Vec<String>, usize) {
-        (&self.founder_multisig_signers, self.founder_multisig_required)
+        (
+            &self.founder_multisig_signers,
+            self.founder_multisig_required,
+        )
     }
 
     /// Check if a signer is authorized for founder actions
@@ -105,7 +108,7 @@ impl VestingContract {
         let schedule = VestingSchedule {
             user_id: user_id.clone(),
             total_amount: amount,
-            cliff_duration_months: 12, // 1-year cliff
+            cliff_duration_months: 12,   // 1-year cliff
             vesting_duration_months: 48, // 4-year vesting
             start_date,
             claimed_amount: 0.0,
@@ -131,7 +134,7 @@ impl VestingContract {
         let schedule = VestingSchedule {
             user_id: user_id.clone(),
             total_amount: amount,
-            cliff_duration_months: 6, // 6-month cliff
+            cliff_duration_months: 6,    // 6-month cliff
             vesting_duration_months: 36, // 3-year vesting
             start_date,
             claimed_amount: 0.0,
@@ -157,7 +160,7 @@ impl VestingContract {
         let schedule = VestingSchedule {
             user_id: user_id.clone(),
             total_amount: amount,
-            cliff_duration_months: 12, // 12 months cliff
+            cliff_duration_months: 12,   // 12 months cliff
             vesting_duration_months: 24, // 24 months linear vesting after cliff
             start_date,
             claimed_amount: 0.0,
@@ -183,7 +186,7 @@ impl VestingContract {
         let schedule = VestingSchedule {
             user_id: user_id.clone(),
             total_amount: amount,
-            cliff_duration_months: 6, // 6 months cliff
+            cliff_duration_months: 6,    // 6 months cliff
             vesting_duration_months: 12, // 12 months linear vesting after cliff
             start_date,
             claimed_amount: 0.0,
@@ -209,7 +212,7 @@ impl VestingContract {
         let schedule = VestingSchedule {
             user_id: user_id.clone(),
             total_amount: amount,
-            cliff_duration_months: 3, // 3-month cliff
+            cliff_duration_months: 3,    // 3-month cliff
             vesting_duration_months: 18, // 18-month vesting
             start_date,
             claimed_amount: 0.0,
@@ -235,7 +238,7 @@ impl VestingContract {
         let schedule = VestingSchedule {
             user_id: user_id.clone(),
             total_amount: amount,
-            cliff_duration_months: 6, // 6-month cliff
+            cliff_duration_months: 6,    // 6-month cliff
             vesting_duration_months: 24, // 24-month vesting
             start_date,
             claimed_amount: 0.0,
@@ -261,7 +264,7 @@ impl VestingContract {
         let schedule = VestingSchedule {
             user_id: user_id.clone(),
             total_amount: amount,
-            cliff_duration_months: 0, // No cliff for public sale
+            cliff_duration_months: 0,    // No cliff for public sale
             vesting_duration_months: 12, // 12-month vesting
             start_date,
             claimed_amount: 0.0,
@@ -281,7 +284,7 @@ impl VestingContract {
             .ok_or(VestingError::NoVestingSchedule)?;
 
         let now = Utc::now().naive_utc();
-        
+
         // Check if vesting has started
         if now < schedule.start_date {
             return Err(VestingError::VestingNotStarted);
@@ -298,13 +301,14 @@ impl VestingContract {
 
         // Calculate vested amount after cliff
         let months_after_cliff = elapsed_months - schedule.cliff_duration_months;
-        
+
         if months_after_cliff >= schedule.vesting_duration_months {
             // Fully vested
             Ok(schedule.total_amount - schedule.claimed_amount)
         } else if schedule.is_linear {
             // Linear vesting
-            let vested_percentage = months_after_cliff as f64 / schedule.vesting_duration_months as f64;
+            let vested_percentage =
+                months_after_cliff as f64 / schedule.vesting_duration_months as f64;
             let vested_amount = schedule.total_amount * vested_percentage;
             Ok(vested_amount - schedule.claimed_amount)
         } else {
@@ -316,7 +320,7 @@ impl VestingContract {
     /// Claim vested tokens
     pub fn claim_vested_tokens(&mut self, user_id: &str) -> Result<f64, VestingError> {
         let claimable_amount = self.calculate_claimable_amount(user_id)?;
-        
+
         if claimable_amount <= 0.0 {
             return Ok(0.0);
         }

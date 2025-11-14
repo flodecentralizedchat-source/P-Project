@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use chrono::{NaiveDateTime, Utc};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct NFTMetadata {
@@ -30,7 +30,7 @@ pub struct NFTCollection {
     pub description: String,
     pub created_at: NaiveDateTime,
     pub max_supply: Option<u64>, // None for unlimited
-    pub is_public: bool, // Whether anyone can mint or only creator
+    pub is_public: bool,         // Whether anyone can mint or only creator
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +81,7 @@ impl NFTContract {
         is_public: bool,
     ) -> Result<String, String> {
         let collection_id = format!("collection_{}", self.total_collections + 1);
-        
+
         let collection = NFTCollection {
             id: collection_id.clone(),
             name,
@@ -92,10 +92,10 @@ impl NFTContract {
             max_supply,
             is_public,
         };
-        
+
         self.collections.insert(collection_id.clone(), collection);
         self.total_collections += 1;
-        
+
         Ok(collection_id)
     }
 
@@ -108,34 +108,40 @@ impl NFTContract {
         royalty_percentage: f64,
     ) -> Result<String, String> {
         // Check if collection exists
-        let collection = self.collections.get(&collection_id).ok_or("Collection not found")?.clone();
-        
+        let collection = self
+            .collections
+            .get(&collection_id)
+            .ok_or("Collection not found")?
+            .clone();
+
         // Check if caller can mint (creator or public collection)
         // In a real implementation, we would verify the caller's identity
         // For now, we'll assume the caller has permission
-        
+
         // Check collection supply limit
         if let Some(max_supply) = collection.max_supply {
-            let collection_nft_count = self.nfts.values()
+            let collection_nft_count = self
+                .nfts
+                .values()
                 .filter(|nft| nft.collection_id == collection_id)
                 .count() as u64;
-                
+
             if collection_nft_count >= max_supply {
                 return Err("Collection has reached maximum supply".to_string());
             }
         }
-        
+
         // Validate royalty percentage
         if royalty_percentage < 0.0 || royalty_percentage > 50.0 {
             return Err("Royalty percentage must be between 0 and 50".to_string());
         }
-        
+
         let nft_id = format!("nft_{}", self.total_nfts + 1);
-        
+
         // Initialize royalty recipients with creator getting the full percentage
         let mut royalty_recipients = HashMap::new();
         royalty_recipients.insert(collection.creator.clone(), royalty_percentage);
-        
+
         let nft = NFT {
             id: nft_id.clone(),
             collection_id: collection_id.clone(),
@@ -146,26 +152,26 @@ impl NFTContract {
             created_at: Utc::now().naive_utc(),
             transferred_at: None,
         };
-        
+
         self.nfts.insert(nft_id.clone(), nft);
         self.total_nfts += 1;
-        
+
         Ok(nft_id)
     }
 
     /// Transfer NFT ownership
     pub fn transfer_nft(&mut self, nft_id: String, from: String, to: String) -> Result<(), String> {
         let nft = self.nfts.get_mut(&nft_id).ok_or("NFT not found")?;
-        
+
         // Verify ownership
         if nft.owner != from {
             return Err("Not the owner of this NFT".to_string());
         }
-        
+
         // Update ownership
         nft.owner = to;
         nft.transferred_at = Some(Utc::now().naive_utc());
-        
+
         Ok(())
     }
 
@@ -179,25 +185,24 @@ impl NFTContract {
         expires_in_seconds: Option<i64>,
     ) -> Result<String, String> {
         let nft = self.nfts.get(&nft_id).ok_or("NFT not found")?;
-        
+
         // Verify ownership
         if nft.owner != seller {
             return Err("Not the owner of this NFT".to_string());
         }
-        
+
         // Check if NFT is already listed
         for listing in self.listings.values() {
             if listing.nft_id == nft_id && listing.is_active {
                 return Err("NFT is already listed for sale".to_string());
             }
         }
-        
+
         let listing_id = format!("listing_{}", self.total_listings + 1);
-        
-        let expires_at = expires_in_seconds.map(|seconds| {
-            Utc::now().naive_utc() + chrono::Duration::seconds(seconds)
-        });
-        
+
+        let expires_at = expires_in_seconds
+            .map(|seconds| Utc::now().naive_utc() + chrono::Duration::seconds(seconds));
+
         let listing = MarketplaceListing {
             id: listing_id.clone(),
             nft_id: nft_id.clone(),
@@ -208,25 +213,28 @@ impl NFTContract {
             expires_at,
             is_active: true,
         };
-        
+
         self.listings.insert(listing_id.clone(), listing);
         self.total_listings += 1;
-        
+
         Ok(listing_id)
     }
 
     /// Cancel NFT listing
     pub fn cancel_listing(&mut self, listing_id: String, seller: String) -> Result<(), String> {
-        let listing = self.listings.get_mut(&listing_id).ok_or("Listing not found")?;
-        
+        let listing = self
+            .listings
+            .get_mut(&listing_id)
+            .ok_or("Listing not found")?;
+
         // Verify ownership
         if listing.seller != seller {
             return Err("Not the seller of this listing".to_string());
         }
-        
+
         // Mark as inactive
         listing.is_active = false;
-        
+
         Ok(())
     }
 
@@ -240,12 +248,12 @@ impl NFTContract {
         // Clone necessary data to avoid borrowing issues
         let (nft_id, seller, price) = {
             let listing = self.listings.get(&listing_id).ok_or("Listing not found")?;
-            
+
             // Check if listing is active
             if !listing.is_active {
                 return Err("Listing is not active".to_string());
             }
-            
+
             // Check if listing has expired
             if let Some(expires_at) = listing.expires_at {
                 if Utc::now().naive_utc() > expires_at {
@@ -253,15 +261,19 @@ impl NFTContract {
                     return Err("Listing has expired".to_string());
                 }
             }
-            
+
             // Check payment amount
             if payment_amount < listing.price {
                 return Err("Insufficient payment amount".to_string());
             }
-            
-            (listing.nft_id.clone(), listing.seller.clone(), listing.price)
+
+            (
+                listing.nft_id.clone(),
+                listing.seller.clone(),
+                listing.price,
+            )
         };
-        
+
         // Check if listing has expired (second check to update the listing)
         let expired = {
             let listing = self.listings.get(&listing_id).unwrap();
@@ -271,98 +283,118 @@ impl NFTContract {
                 false
             }
         };
-        
+
         if expired {
             let listing = self.listings.get_mut(&listing_id).unwrap();
             listing.is_active = false;
             return Err("Listing has expired".to_string());
         }
-        
+
         // Transfer NFT ownership
         self.transfer_nft(nft_id.clone(), seller.clone(), buyer.clone())?;
-        
+
         // Process payment
         // Calculate total royalty amount from all recipients
         let nft = self.nfts.get(&nft_id).ok_or("NFT not found")?;
         let total_royalty_percentage: f64 = nft.royalty_recipients.values().sum();
         let royalty_amount = price * (total_royalty_percentage / 100.0);
         let seller_amount = price - royalty_amount;
-        
+
         // Update balances
         *self.owner_balances.entry(buyer).or_insert(0.0) -= price;
         *self.owner_balances.entry(seller).or_insert(0.0) += seller_amount;
-        
+
         // Distribute royalties to all recipients
         if royalty_amount > 0.0 {
             let nft = self.nfts.get(&nft_id).ok_or("NFT not found")?;
             for (recipient, percentage) in &nft.royalty_recipients {
                 let recipient_amount = royalty_amount * (percentage / total_royalty_percentage);
-                *self.royalty_balances.entry(recipient.clone()).or_insert(0.0) += recipient_amount;
+                *self
+                    .royalty_balances
+                    .entry(recipient.clone())
+                    .or_insert(0.0) += recipient_amount;
             }
         }
-        
+
         // Mark listing as inactive
         let listing = self.listings.get_mut(&listing_id).unwrap();
         listing.is_active = false;
-        
+
         Ok(())
     }
 
     /// Withdraw earnings from sales
     pub fn withdraw_earnings(&mut self, user: String, amount: f64) -> Result<f64, String> {
-        let balance = self.owner_balances.get_mut(&user).ok_or("No balance found")?;
-        
+        let balance = self
+            .owner_balances
+            .get_mut(&user)
+            .ok_or("No balance found")?;
+
         if *balance < amount {
             return Err("Insufficient balance".to_string());
         }
-        
+
         *balance -= amount;
         Ok(*balance)
     }
 
     /// Withdraw accumulated royalties
     pub fn withdraw_royalties(&mut self, recipient: String, amount: f64) -> Result<f64, String> {
-        let balance = self.royalty_balances.get_mut(&recipient).ok_or("No royalty balance found")?;
-        
+        let balance = self
+            .royalty_balances
+            .get_mut(&recipient)
+            .ok_or("No royalty balance found")?;
+
         if *balance < amount {
             return Err("Insufficient royalty balance".to_string());
         }
-        
+
         *balance -= amount;
         Ok(*balance)
     }
 
     /// Add a royalty recipient to an NFT
-    pub fn add_royalty_recipient(&mut self, nft_id: String, recipient: String, percentage: f64) -> Result<(), String> {
+    pub fn add_royalty_recipient(
+        &mut self,
+        nft_id: String,
+        recipient: String,
+        percentage: f64,
+    ) -> Result<(), String> {
         let nft = self.nfts.get_mut(&nft_id).ok_or("NFT not found")?;
-        
+
         // Validate percentage
         if percentage <= 0.0 || percentage > 100.0 {
             return Err("Royalty percentage must be between 0 and 100".to_string());
         }
-        
+
         // Check total royalty percentage doesn't exceed 100%
         let current_total: f64 = nft.royalty_recipients.values().sum();
         if current_total + percentage > 100.0 {
             return Err("Total royalty percentage cannot exceed 100%".to_string());
         }
-        
+
         // Add recipient
         nft.royalty_recipients.insert(recipient, percentage);
         Ok(())
     }
 
     /// Remove a royalty recipient from an NFT
-    pub fn remove_royalty_recipient(&mut self, nft_id: String, recipient: String) -> Result<f64, String> {
+    pub fn remove_royalty_recipient(
+        &mut self,
+        nft_id: String,
+        recipient: String,
+    ) -> Result<f64, String> {
         let nft = self.nfts.get_mut(&nft_id).ok_or("NFT not found")?;
-        
+
         // Cannot remove the original creator
         if nft.creator == recipient {
             return Err("Cannot remove the original creator from royalty recipients".to_string());
         }
-        
+
         // Remove recipient and return their percentage
-        nft.royalty_recipients.remove(&recipient).ok_or("Recipient not found in royalty distribution".to_string())
+        nft.royalty_recipients
+            .remove(&recipient)
+            .ok_or("Recipient not found in royalty distribution".to_string())
     }
 
     /// Get royalty recipients for an NFT
@@ -383,7 +415,8 @@ impl NFTContract {
 
     /// Get active listings
     pub fn get_active_listings(&self) -> Vec<&MarketplaceListing> {
-        self.listings.values()
+        self.listings
+            .values()
             .filter(|listing| listing.is_active)
             .filter(|listing| {
                 if let Some(expires_at) = listing.expires_at {
@@ -397,14 +430,13 @@ impl NFTContract {
 
     /// Get user's NFTs
     pub fn get_user_nfts(&self, user: String) -> Vec<&NFT> {
-        self.nfts.values()
-            .filter(|nft| nft.owner == user)
-            .collect()
+        self.nfts.values().filter(|nft| nft.owner == user).collect()
     }
 
     /// Get collection NFTs
     pub fn get_collection_nfts(&self, collection_id: String) -> Vec<&NFT> {
-        self.nfts.values()
+        self.nfts
+            .values()
             .filter(|nft| nft.collection_id == collection_id)
             .collect()
     }

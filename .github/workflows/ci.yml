@@ -58,6 +58,21 @@ jobs:
           target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+    - name: Cargo audit (dependency vulnerabilities)
+      uses: actions-rs/audit-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Cargo deny (advisories, bans, licenses, sources)
+      uses: EmbarkStudios/cargo-deny-action@v1
+      with:
+        command: check
+        arguments: --all-features
+
+    - name: Gitleaks (secret scan)
+      run: |
+        docker run --rm -v ${{ github.workspace }}:/workspace ghcr.io/gitleaks/gitleaks:latest detect -s /workspace --no-git -v --redact --exit-code 1
+
     - name: Build
       run: |
         cargo build --verbose

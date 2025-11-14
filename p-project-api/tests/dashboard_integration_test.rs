@@ -8,14 +8,23 @@ use p_project_core::database::MySqlDatabase;
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot` and `ready`
 
-// Helper function to create a test app
-fn app() -> Router {
-    // In a real test, we would use a mock database
-    // For now, we'll create a minimal app for testing routes
-    let db = MySqlDatabase::new("mysql://test:test@localhost/test").expect("Failed to create test DB");
+#[tokio::test]
+async fn test_dao_endpoints() {
+    // Skip this test if we don't have a database connection
+    let db_url = match std::env::var("TEST_DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("Skipping DAO integration test - no TEST_DATABASE_URL");
+            return;
+        }
+    };
+
+    // Initialize database
+    let db = MySqlDatabase::new(&db_url).await.expect("Failed to connect to database");
+    // Skip table initialization for this test as we're only testing routes
+
     let app_state = AppState { db: Arc::new(db) };
-    
-    Router::new()
+    let app = Router::new()
         // DAO endpoints
         .route("/dao/proposals", axum::routing::post(handlers::create_proposal))
         .route("/dao/proposals/vote", axum::routing::post(handlers::vote_on_proposal))
@@ -23,21 +32,11 @@ fn app() -> Router {
         .route("/dao/proposals/execute", axum::routing::post(handlers::execute_proposal))
         .route("/dao/delegate", axum::routing::post(handlers::delegate_vote))
         .route("/dao/proposals", axum::routing::get(handlers::get_proposals))
-        // Staking endpoints
-        .route("/staking/yield", axum::routing::post(handlers::calculate_staking_yield))
-        .route("/staking/tiers", axum::routing::get(handlers::get_staking_tiers))
-        // Airdrop endpoints
-        .route("/airdrop/status", axum::routing::get(handlers::get_airdrop_status))
-        .route("/airdrop/recipients", axum::routing::get(handlers::get_airdrop_recipients))
-        .with_state(app_state)
-}
-
-#[tokio::test]
-async fn test_dao_endpoints() {
-    let app = app();
+        .with_state(app_state);
 
     // Test create proposal endpoint
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method(http::Method::POST)
@@ -55,6 +54,7 @@ async fn test_dao_endpoints() {
 
     // Test get proposals endpoint
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method(http::Method::GET)
@@ -70,10 +70,29 @@ async fn test_dao_endpoints() {
 
 #[tokio::test]
 async fn test_staking_endpoints() {
-    let app = app();
+    // Skip this test if we don't have a database connection
+    let db_url = match std::env::var("TEST_DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("Skipping staking integration test - no TEST_DATABASE_URL");
+            return;
+        }
+    };
+
+    // Initialize database
+    let db = MySqlDatabase::new(&db_url).await.expect("Failed to connect to database");
+    // Skip table initialization for this test as we're only testing routes
+
+    let app_state = AppState { db: Arc::new(db) };
+    let app = Router::new()
+        // Staking endpoints
+        .route("/staking/yield", axum::routing::post(handlers::calculate_staking_yield))
+        .route("/staking/tiers", axum::routing::get(handlers::get_staking_tiers))
+        .with_state(app_state);
 
     // Test calculate staking yield endpoint
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method(http::Method::POST)
@@ -91,6 +110,7 @@ async fn test_staking_endpoints() {
 
     // Test get staking tiers endpoint
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method(http::Method::GET)
@@ -106,10 +126,29 @@ async fn test_staking_endpoints() {
 
 #[tokio::test]
 async fn test_airdrop_endpoints() {
-    let app = app();
+    // Skip this test if we don't have a database connection
+    let db_url = match std::env::var("TEST_DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("Skipping airdrop integration test - no TEST_DATABASE_URL");
+            return;
+        }
+    };
+
+    // Initialize database
+    let db = MySqlDatabase::new(&db_url).await.expect("Failed to connect to database");
+    // Skip table initialization for this test as we're only testing routes
+
+    let app_state = AppState { db: Arc::new(db) };
+    let app = Router::new()
+        // Airdrop endpoints
+        .route("/airdrop/status", axum::routing::get(handlers::get_airdrop_status))
+        .route("/airdrop/recipients", axum::routing::get(handlers::get_airdrop_recipients))
+        .with_state(app_state);
 
     // Test get airdrop status endpoint
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method(http::Method::GET)

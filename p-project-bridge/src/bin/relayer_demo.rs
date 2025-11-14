@@ -7,7 +7,7 @@ use tokio::signal;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let db_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://user:password@localhost/p_project".to_string());
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "DATABASE_URL not set"))?;
     let db = MySqlDatabase::new(&db_url).await?;
     db.init_tables().await?;
 

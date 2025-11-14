@@ -13,7 +13,7 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 # 1. **Social & Humanitarian Use Cases**
 
-### ✔ 1.1 Charitable Donations
+### ✔ 1.1 Charitable Donations[implemented]
 
 * Blockchain-transparent charity fund
 * Donation tracking with immutable receipts
@@ -21,7 +21,7 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 * Crowdfunding via P-Coin campaigns
 * Instant micro-donations (as low as $0.001)
 
-### ✔ 1.2 Humanitarian Aid Distribution
+### ✔ 1.2 Humanitarian Aid Distribution[implemented]
 
 * Token vouchers for food, medicine, water
 * Aid distribution in war or disaster zones
@@ -33,7 +33,7 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 * Sponsor peace-builders, activists, mediators
 * Fund peace education programs
 
-### ✔ 1.4 Social Proof & Impact
+### ✔ 1.4 Social Proof & Impact[implemented]
 
 * NFT-based *Proof-of-Peace* badges
 * Social reputation: “verified donor score”
@@ -41,9 +41,11 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 ---
 
+
+
 # 2. **Commerce & Merchant Use Cases**
 
-### ✔ 2.1 Small Business Acceptance
+### ✔ 2.1 Small Business Acceptance[implemented]
 
 * Coffee shops
 * Restaurants

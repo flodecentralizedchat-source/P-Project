@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: p-project-web
+  labels:
+    app: p-project-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: p-project-web
+  template:
+    metadata:
+      labels:
+        app: p-project-web
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/example/p-project-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: p-project-web
+  labels:
+    app: p-project-web
+spec:
+  selector:
+    app: p-project-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

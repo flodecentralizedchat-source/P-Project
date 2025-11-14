@@ -46,10 +46,10 @@ pub struct StakingTier {
 pub struct StakingRewardsConfig {
     pub total_rewards_pool: f64, // 17.5M tokens for staking rewards
     pub start_date: NaiveDateTime,
-    pub year1_allocation: f64, // 40% of total rewards
-    pub year2_allocation: f64, // 30% of total rewards
-    pub year3_allocation: f64, // 20% of total rewards
-    pub year4_allocation: f64, // 10% of total rewards
+    pub year1_allocation: f64,    // 40% of total rewards
+    pub year2_allocation: f64,    // 30% of total rewards
+    pub year3_allocation: f64,    // 20% of total rewards
+    pub year4_allocation: f64,    // 10% of total rewards
     pub distributed_rewards: f64, // Track distributed rewards
 }
 
@@ -61,7 +61,7 @@ pub struct StakingContract {
     emergency_withdrawals_enabled: bool, // Emergency withdrawal feature flag
     rewards_config: StakingRewardsConfig, // Staking rewards configuration
     // New fields for team staking incentives
-    team_member_boost: f64,          // Additional APY boost for team members
+    team_member_boost: f64, // Additional APY boost for team members
     team_member_list: HashMap<String, bool>, // user_id -> is_team_member
 }
 
@@ -92,7 +92,7 @@ impl StakingContract {
                 name: "Team".to_string(),
                 min_amount: 1000.0,
                 duration_days: 180, // 6 months minimum for team members
-                apy_rate: 0.25, // 25% APY base rate
+                apy_rate: 0.25,     // 25% APY base rate
             },
         ];
 
@@ -444,7 +444,12 @@ impl StakingContract {
     }
 
     /// Calculate projected rewards for a staking position
-    pub fn calculate_projected_rewards(&self, amount: f64, duration_days: i64, tier_name: Option<&str>) -> f64 {
+    pub fn calculate_projected_rewards(
+        &self,
+        amount: f64,
+        duration_days: i64,
+        tier_name: Option<&str>,
+    ) -> f64 {
         // Determine APY based on tier
         let apy_rate = if let Some(tier_name) = tier_name {
             let mut found_apy = 0.05; // Default to basic 5% APY if no tier matches

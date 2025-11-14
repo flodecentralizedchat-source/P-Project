@@ -461,3 +461,26 @@ This guide targets development usage. For production hardening, you'll want to l
 - POST `/bridge/status`
   - 404 `{ "error": "transaction_not_found" }` when the transaction ID doesn't exist.
   - 500 `{ "error": "internal_error" }` for database failures.
+## Security & Roles
+
+- Authentication: all mutating/sensitive endpoints require JWT (HS256). See `p-docs/auth.md` for setup and examples.
+- Roles:
+  - user: default role, may perform transfers, staking, claims, bridge submits, and Web2 donation/tip interactions.
+  - governance: can manage DAO tally and proposal execution (where allowed).
+  - admin: full administrative controls (airdrop creation, governance execute, Web2 configuration, bot registration).
+- Admin-only routes:
+  - POST `/airdrop/create`
+  - POST `/web2/create-donation-widget`
+  - POST `/web2/create-youtube-tip-config`
+  - POST `/web2/register-messaging-bot`
+- Governance-level:
+  - POST `/dao/proposals/execute` (governance or admin)
+  - POST `/dao/proposals/tally` (governance or admin)
+- Public (no auth):
+  - GET `/`, `/metrics`, `/staking/tiers`, `/airdrop/status`, `/airdrop/recipients`
+
+### Rate limiting
+
+- Global per-IP default: `RATE_LIMIT_MAX` per `RATE_LIMIT_WINDOW_SECS`.
+- Admin routes stricter: window `STRICT_RATE_LIMIT_WINDOW_SECS`, max `STRICT_RATE_LIMIT_MAX`.
+- Configure in `.env`. See `.env.example`.

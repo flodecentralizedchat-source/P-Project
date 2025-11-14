@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use rust_decimal::Decimal;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct User {
@@ -21,7 +22,7 @@ pub struct TokenTransaction {
     pub id: String,
     pub from_user_id: String,
     pub to_user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
     pub transaction_type: TransactionType,
     pub timestamp: chrono::NaiveDateTime,
 }
@@ -29,10 +30,10 @@ pub struct TokenTransaction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StakingInfo {
     pub user_id: String,
-    pub amount: f64,
+    pub amount: Decimal,
     pub start_time: chrono::NaiveDateTime,
     pub end_time: Option<chrono::NaiveDateTime>,
-    pub rewards_earned: f64,
+    pub rewards_earned: Decimal,
     pub tier_name: Option<String>, // Staking tier name
     pub is_compounding: bool,      // Whether rewards are compounded
 }

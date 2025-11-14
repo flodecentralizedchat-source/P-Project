@@ -1,0 +1,174 @@
+name: Container Security
+
+on:
+  push:
+    branches: [ main, clean-branch ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '15 2 * * 0'
+
+jobs:
+  scan-images:
+    name: Scan Container Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API runtime image (no push)
+        run: |
+          docker build --pull --target api-runtime -t pproject-api:ci .
+
+      - name: Build Web static image (no push)
+        run: |
+          docker build --pull --target web-static -t pproject-web:ci .
+
+      - name: Build Bridge relayer image (no push)
+        run: |
+          docker build --pull --target bridge-relayer-runtime -t pproject-bridge:ci .
+
+      - name: Build Airdrop cron image (no push)
+        run: |
+          docker build --pull --target airdrop-cron-runtime -t pproject-airdrop-cron:ci .
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/trivy
+          key: ${{ runner.os }}-trivy-${{ hashFiles('.github/workflows/container-security.yml') }}
+
+      - name: Cache Grype DB
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/grype/db
+          key: ${{ runner.os }}-grype-${{ hashFiles('.github/workflows/container-security.yml') }}
+
+      - name: Trivy scan (API)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: pproject-api:ci
+          format: 'sarif'
+          output: 'trivy-api.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF (API)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-api.sarif
+
+      - name: Trivy scan (Web)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: pproject-web:ci
+          format: 'sarif'
+          output: 'trivy-web.sarif'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF (Web)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-web.sarif
+
+      - name: Grype scan (API)
+        uses: anchore/scan-action@v3
+        with:
+          image: 'pproject-api:ci'
+          output-format: 'sarif'
+          output-file: 'grype-api.sarif'
+          severity-cutoff: 'high'
+          fail-build: true
+
+      - name: Upload Grype SARIF (API)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: grype-api.sarif
+
+      - name: Grype scan (Web)
+        uses: anchore/scan-action@v3
+        with:
+          image: 'pproject-web:ci'
+          output-format: 'sarif'
+          output-file: 'grype-web.sarif'
+          severity-cutoff: 'critical'
+          fail-build: true
+
+      - name: Upload Grype SARIF (Web)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: grype-web.sarif
+
+      - name: Grype scan (Bridge)
+        uses: anchore/scan-action@v3
+        with:
+          image: 'pproject-bridge:ci'
+          output-format: 'sarif'
+          output-file: 'grype-bridge.sarif'
+          severity-cutoff: 'high'
+          fail-build: true
+
+      - name: Upload Grype SARIF (Bridge)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: grype-bridge.sarif
+
+      - name: Grype scan (Airdrop Cron)
+        uses: anchore/scan-action@v3
+        with:
+          image: 'pproject-airdrop-cron:ci'
+          output-format: 'sarif'
+          output-file: 'grype-airdrop.sarif'
+          severity-cutoff: 'critical'
+          fail-build: true
+
+      - name: Upload Grype SARIF (Airdrop)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: grype-airdrop.sarif
+      - name: Trivy scan (Bridge)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: pproject-bridge:ci
+          format: 'sarif'
+          output: 'trivy-bridge.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF (Bridge)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-bridge.sarif
+
+      - name: Trivy scan (Airdrop Cron)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: pproject-airdrop-cron:ci
+          format: 'sarif'
+          output: 'trivy-airdrop.sarif'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF (Airdrop)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-airdrop.sarif
+
