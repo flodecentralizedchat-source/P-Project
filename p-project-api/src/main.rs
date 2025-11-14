@@ -58,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/ai/verify-impact", post(handlers::verify_impact))
         .route("/ai/generate-nft-art", post(handlers::generate_peace_nft_art))
         .route("/ai/detect-fraud", post(handlers::detect_fraud))
+        .route("/ai/generate-meme", post(handlers::generate_ai_meme))
         // IoT Service endpoints
         .route("/iot/register-donation-box", post(handlers::register_donation_box))
         .route("/iot/record-donation", post(handlers::record_donation))

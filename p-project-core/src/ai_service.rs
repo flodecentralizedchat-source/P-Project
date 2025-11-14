@@ -97,6 +97,25 @@ pub struct SuspiciousActivity {
     pub confidence: f32,
 }
 
+/// AI-generated meme request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AIMemeRequest {
+    pub prompt: String,
+    pub style: String,
+    pub width: u32,
+    pub height: u32,
+    pub template: Option<String>, // Optional meme template to use
+}
+
+/// AI-generated meme response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AIMemeResponse {
+    pub image_data: String, // Base64 encoded image
+    pub metadata_uri: String,
+    pub generation_time_ms: u64,
+    pub meme_text: String, // Text added to the meme
+}
+
 /// AI Service for P-Project
 pub struct AIService {
     config: AIServiceConfig,
@@ -182,6 +201,35 @@ impl AIService {
             risk_score,
             suspicious_activities,
             recommendations,
+        })
+    }
+
+    /// Generate AI-powered memes
+    pub async fn generate_meme(&self, request: AIMemeRequest) -> Result<AIMemeResponse, Box<dyn std::error::Error>> {
+        // In a real implementation, this would call an AI image generation API
+        // For now, we'll simulate the response
+        
+        // Simulate generation time
+        let generation_time_ms = 3000;
+        
+        // Simulate base64 encoded image data
+        let image_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==".to_string();
+        
+        // Simulate metadata URI
+        let metadata_uri = format!("ipfs://Qm{}", uuid::Uuid::new_v4());
+        
+        // Simulate meme text based on prompt
+        let meme_text = if request.prompt.len() > 20 {
+            request.prompt[..20].to_string() + "..."
+        } else {
+            request.prompt.clone()
+        };
+        
+        Ok(AIMemeResponse {
+            image_data,
+            metadata_uri,
+            generation_time_ms,
+            meme_text,
         })
     }
 }
@@ -287,5 +335,30 @@ mod tests {
         let response = service.detect_fraud(request).await.unwrap();
         assert!(!response.analysis_id.is_empty());
         assert!(response.risk_score >= 0.0 && response.risk_score <= 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_meme_generation() {
+        let config = AIServiceConfig {
+            api_key: "test_key".to_string(),
+            model: "dall-e-meme".to_string(),
+            temperature: 0.7,
+        };
+        
+        let service = AIService::new(config);
+        
+        let request = AIMemeRequest {
+            prompt: "Funny cat with sunglasses".to_string(),
+            style: "comic".to_string(),
+            width: 512,
+            height: 512,
+            template: Some("drake-pointing".to_string()),
+        };
+        
+        let response = service.generate_meme(request).await.unwrap();
+        assert!(!response.image_data.is_empty());
+        assert!(!response.metadata_uri.is_empty());
+        assert!(response.generation_time_ms > 0);
+        assert!(!response.meme_text.is_empty());
     }
 }

@@ -133,6 +133,7 @@ Intelligent features powered by artificial intelligence:
 - **Impact Verification**: AI chatbots that verify social impact activities
 - **NFT Art Generation**: AI-powered creation of unique Peace NFTs
 - **Fraud Detection**: Machine learning models to detect suspicious activities
+- **Meme Generation**: AI-powered creation of viral memes for community engagement
 
 ### IoT Integration
 Real-world applications through Internet of Things:
@@ -169,6 +170,7 @@ Our WebAssembly-powered frontend provides:
 | `/ai/verify-impact` | POST | Verify social impact with AI chatbots |
 | `/ai/generate-nft-art` | POST | Generate Peace NFT art with AI |
 | `/ai/detect-fraud` | POST | Detect fraudulent activities |
+| `/ai/generate-meme` | POST | Generate AI-powered memes |
 | `/iot/register-donation-box` | POST | Register a new smart donation box |
 | `/iot/record-donation` | POST | Record a donation to a box |
 | `/iot/register-wristband` | POST | Register an NFC wristband |
@@ -208,7 +210,7 @@ Join our vibrant community:
 ### Phase 3: Innovation 🚧
 - [x] NFT marketplace integration
 - [x] DeFi yield farming pools
-- [ ] AI-powered meme generator
+- [x] AI-powered meme generator
 - [ ] Layer 2 blockchain solution
 
 ## 🛡️ Security

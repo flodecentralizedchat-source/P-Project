@@ -851,6 +851,64 @@ pub async fn detect_fraud(
     }
 }
 
+/// AI-generated meme request
+#[derive(Debug, Deserialize)]
+pub struct AIMemeRequest {
+    pub prompt: String,
+    pub style: String,
+    pub width: u32,
+    pub height: u32,
+    pub template: Option<String>,
+}
+
+/// AI-generated meme response
+#[derive(Debug, Serialize)]
+pub struct AIMemeResponse {
+    pub image_data: String,
+    pub metadata_uri: String,
+    pub generation_time_ms: u64,
+    pub meme_text: String,
+}
+
+pub async fn generate_ai_meme(
+    State(_state): State<AppState>,
+    Json(req): Json<AIMemeRequest>,
+) -> Result<Json<AIMemeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Initialize AI service
+    let ai_config = AIServiceConfig {
+        api_key: "test_key".to_string(), // In production, get from environment variables
+        model: "dall-e-meme".to_string(),
+        temperature: 0.7,
+    };
+    let ai_service = AIService::new(ai_config);
+    
+    // Convert handler request to core request
+    let core_request = p_project_core::AIMemeRequest {
+        prompt: req.prompt,
+        style: req.style,
+        width: req.width,
+        height: req.height,
+        template: req.template,
+    };
+    
+    match ai_service.generate_meme(core_request).await {
+        Ok(response) => {
+            // Convert core response to handler response
+            let handler_response = AIMemeResponse {
+                image_data: response.image_data,
+                metadata_uri: response.metadata_uri,
+                generation_time_ms: response.generation_time_ms,
+                meme_text: response.meme_text,
+            };
+            Ok(Json(handler_response))
+        },
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e.to_string() }),
+        )),
+    }
+}
+
 // ---------------- IoT Service handlers ----------------
 #[derive(Debug, Deserialize)]
 pub struct RegisterDonationBoxRequest {
