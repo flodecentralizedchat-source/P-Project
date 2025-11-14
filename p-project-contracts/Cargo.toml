@@ -16,7 +16,7 @@ kani-verifier = { version = "0.63", optional = true }
 # Post-quantum cryptography
 kyberlib = "0.0.6"
 # Zero-knowledge proofs
-ark-ec = "0.4.2"
+ark-ec = "0.5.0"
 ark-ff = "0.4.2"
 ark-poly = "0.4.2"
 ark-poly-commit = "0.5.0"
