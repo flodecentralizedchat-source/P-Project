@@ -221,10 +221,9 @@ P-Project prioritizes security through:
 - **Renounced Ownership**: Optional for full decentralization
 - **Transparency Dashboard**: Live token distribution and burn tracking
 
-## 🤓 Meet Professor P
+## 🤓 Meet P-team
 
-Our mascot, Professor P, is the genius social scientist who accidentally created the most sophisticated social impact ecosystem ever conceived. With his sarcastic wit and community-first approach, he guides P-Project's development while keeping the fun in DeFi and the purpose in profit.
-
+Our mascot
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
