@@ -37,6 +37,16 @@ pub struct VestingSchedule {
     pub start_date: NaiveDateTime,
     pub claimed_amount: f64,
     pub is_linear: bool, // Linear vesting or other schedule
+    pub schedule_type: VestingType, // Type of vesting schedule
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum VestingType {
+    Founder,
+    FoundingMember,
+    Team,
+    Advisor,
+    Investor, // Add Investor variant for investor vesting schedules
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +54,9 @@ pub struct VestingContract {
     schedules: HashMap<String, VestingSchedule>,
     total_vesting_tokens: f64,
     claimed_tokens: f64,
+    // Add fields for multisig requirements for founder wallets
+    founder_multisig_signers: Vec<String>, // List of authorized signers for founder actions
+    founder_multisig_required: usize,      // Number of signatures required for founder actions
 }
 
 impl VestingContract {
@@ -52,7 +65,82 @@ impl VestingContract {
             schedules: HashMap::new(),
             total_vesting_tokens,
             claimed_tokens: 0.0,
+            // Initialize with default multisig settings for founder wallets
+            founder_multisig_signers: vec![
+                "founder1".to_string(),
+                "founder2".to_string(),
+                "legal_representative".to_string(),
+            ],
+            founder_multisig_required: 2, // 2-of-3 multisig for founder actions
         }
+    }
+
+    /// Set multisig signers for founder wallets
+    pub fn set_founder_multisig_signers(&mut self, signers: Vec<String>, required: usize) {
+        self.founder_multisig_signers = signers;
+        self.founder_multisig_required = required;
+    }
+
+    /// Get multisig signers for founder wallets
+    pub fn get_founder_multisig_signers(&self) -> (&Vec<String>, usize) {
+        (&self.founder_multisig_signers, self.founder_multisig_required)
+    }
+
+    /// Check if a signer is authorized for founder actions
+    pub fn is_founder_signer(&self, signer: &str) -> bool {
+        self.founder_multisig_signers.contains(&signer.to_string())
+    }
+
+    /// Create a vesting schedule for founders (4-year vesting, 1-year cliff)
+    pub fn create_founder_vesting(
+        &mut self,
+        user_id: String,
+        amount: f64,
+        start_date: NaiveDateTime,
+    ) -> Result<(), VestingError> {
+        if self.claimed_tokens + amount > self.total_vesting_tokens {
+            return Err(VestingError::InsufficientTokens);
+        }
+
+        let schedule = VestingSchedule {
+            user_id: user_id.clone(),
+            total_amount: amount,
+            cliff_duration_months: 12, // 1-year cliff
+            vesting_duration_months: 48, // 4-year vesting
+            start_date,
+            claimed_amount: 0.0,
+            is_linear: true,
+            schedule_type: VestingType::Founder,
+        };
+
+        self.schedules.insert(user_id, schedule);
+        Ok(())
+    }
+
+    /// Create a vesting schedule for founding members (3-year vesting, 6-month cliff)
+    pub fn create_founding_member_vesting(
+        &mut self,
+        user_id: String,
+        amount: f64,
+        start_date: NaiveDateTime,
+    ) -> Result<(), VestingError> {
+        if self.claimed_tokens + amount > self.total_vesting_tokens {
+            return Err(VestingError::InsufficientTokens);
+        }
+
+        let schedule = VestingSchedule {
+            user_id: user_id.clone(),
+            total_amount: amount,
+            cliff_duration_months: 6, // 6-month cliff
+            vesting_duration_months: 36, // 3-year vesting
+            start_date,
+            claimed_amount: 0.0,
+            is_linear: true,
+            schedule_type: VestingType::FoundingMember,
+        };
+
+        self.schedules.insert(user_id, schedule);
+        Ok(())
     }
 
     /// Create a vesting schedule for team members (12m cliff + 24m linear)
@@ -74,6 +162,7 @@ impl VestingContract {
             start_date,
             claimed_amount: 0.0,
             is_linear: true,
+            schedule_type: VestingType::Team,
         };
 
         self.schedules.insert(user_id, schedule);
@@ -99,6 +188,85 @@ impl VestingContract {
             start_date,
             claimed_amount: 0.0,
             is_linear: true,
+            schedule_type: VestingType::Advisor,
+        };
+
+        self.schedules.insert(user_id, schedule);
+        Ok(())
+    }
+
+    /// Create a vesting schedule for seed round investors (18-month vesting, 3-month cliff)
+    pub fn create_seed_investor_vesting(
+        &mut self,
+        user_id: String,
+        amount: f64,
+        start_date: NaiveDateTime,
+    ) -> Result<(), VestingError> {
+        if self.claimed_tokens + amount > self.total_vesting_tokens {
+            return Err(VestingError::InsufficientTokens);
+        }
+
+        let schedule = VestingSchedule {
+            user_id: user_id.clone(),
+            total_amount: amount,
+            cliff_duration_months: 3, // 3-month cliff
+            vesting_duration_months: 18, // 18-month vesting
+            start_date,
+            claimed_amount: 0.0,
+            is_linear: true,
+            schedule_type: VestingType::Investor,
+        };
+
+        self.schedules.insert(user_id, schedule);
+        Ok(())
+    }
+
+    /// Create a vesting schedule for private round investors (24-month vesting, 6-month cliff)
+    pub fn create_private_investor_vesting(
+        &mut self,
+        user_id: String,
+        amount: f64,
+        start_date: NaiveDateTime,
+    ) -> Result<(), VestingError> {
+        if self.claimed_tokens + amount > self.total_vesting_tokens {
+            return Err(VestingError::InsufficientTokens);
+        }
+
+        let schedule = VestingSchedule {
+            user_id: user_id.clone(),
+            total_amount: amount,
+            cliff_duration_months: 6, // 6-month cliff
+            vesting_duration_months: 24, // 24-month vesting
+            start_date,
+            claimed_amount: 0.0,
+            is_linear: true,
+            schedule_type: VestingType::Investor,
+        };
+
+        self.schedules.insert(user_id, schedule);
+        Ok(())
+    }
+
+    /// Create a vesting schedule for public sale/IDO participants (12-month linear vesting, 10% TGE)
+    pub fn create_public_sale_vesting(
+        &mut self,
+        user_id: String,
+        amount: f64,
+        start_date: NaiveDateTime,
+    ) -> Result<(), VestingError> {
+        if self.claimed_tokens + amount > self.total_vesting_tokens {
+            return Err(VestingError::InsufficientTokens);
+        }
+
+        let schedule = VestingSchedule {
+            user_id: user_id.clone(),
+            total_amount: amount,
+            cliff_duration_months: 0, // No cliff for public sale
+            vesting_duration_months: 12, // 12-month vesting
+            start_date,
+            claimed_amount: 0.0,
+            is_linear: true,
+            schedule_type: VestingType::Investor,
         };
 
         self.schedules.insert(user_id, schedule);

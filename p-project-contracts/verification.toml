@@ -1,0 +1,60 @@
+# Formal Verification Configuration
+
+# This file contains configuration for running formal verification tools
+# on the P-Project smart contracts
+
+# Kani verification configurations
+[kani]
+# Enable verification features
+features = ["verification"]
+
+# Verification harnesses to run
+harnesses = [
+    "formal_verification::verification::verify_liquidity_pool_creation",
+    "formal_verification::verification::verify_liquidity_provision",
+    "formal_verification::verification::verify_token_swap",
+    "formal_verification::verification::verify_reward_calculation",
+    "l2_model_checking::l2_model_checking::verify_rollup_state_consistency",
+    "l2_model_checking::l2_model_checking::verify_transaction_processing",
+    "l2_model_checking::l2_model_checking::verify_cross_chain_message_processing"
+]
+
+# Verification settings
+unwind = 5
+timeout = 300
+
+# Verus verification configurations (if using Verus)
+[verus]
+# Enable Verus features
+features = ["verus"]
+
+# Theorem proving configurations
+proofs = [
+    "theorem_proving::critical_function_proofs::prove_constant_product_invariant",
+    "theorem_proving::critical_function_proofs::prove_balance_non_negativity",
+    "theorem_proving::critical_function_proofs::prove_state_root_consistency"
+]
+
+# Certora Prover configurations (if using Certora)
+[certora]
+# Specification files
+spec_files = [
+    "specs/liquidity_pool.spec",
+    "specs/l2_rollup.spec",
+    "specs/cross_chain.spec"
+]
+
+# Contract files to verify
+contract_files = [
+    "src/liquidity_pool.rs",
+    "src/l2_rollup.rs",
+    "src/l2_cross_chain.rs"
+]
+
+# Verification rules
+rules = [
+    "constant_product_invariant",
+    "balance_non_negativity",
+    "state_consistency",
+    "transaction_safety"
+]

@@ -135,7 +135,10 @@ impl AirdropContract {
         }
 
         // Get the leaf hash for the user
-        let leaf_data = format!("{}:{}", user_id, self.recipients.get(user_id).unwrap());
+        let Some(amount) = self.recipients.get(user_id) else {
+            return false;
+        };
+        let leaf_data = format!("{}:{}", user_id, amount);
         let mut current_hash = format!("{:x}", md5::compute(leaf_data));
 
         // Verify the proof against the root
@@ -250,7 +253,10 @@ impl AirdropContract {
             }
         }
 
-        let base_amount = *self.recipients.get(user_id).unwrap();
+        let base_amount = match self.recipients.get(user_id) {
+            Some(v) => *v,
+            None => return Err(AirdropError::UserNotEligible),
+        };
         let referral_bonus = self.calculate_referral_bonus(user_id, base_amount);
         let total_amount = base_amount + referral_bonus;
 

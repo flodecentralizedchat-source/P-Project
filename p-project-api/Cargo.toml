@@ -19,6 +19,7 @@ path = "src/bin/harness.rs"
 p-project-core = { path = "../p-project-core" }
 p-project-contracts = { path = "../p-project-contracts" }
 p-project-airdrop = { path = "../p-project-airdrop" }
+p-project-bridge = { path = "../p-project-bridge" }
 axum.workspace = true
 serde.workspace = true
 serde_json = "1.0"

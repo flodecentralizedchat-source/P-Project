@@ -58,32 +58,100 @@ fn test_airdrop_insufficient_tokens() {
     assert_eq!(result.unwrap_err(), AirdropError::InsufficientTokens);
 }
 
-// Temporarily disable the failing Merkle tree test
-// #[test]
-// fn test_merkle_tree_functionality() {
-//     // Create a simple Merkle tree with 2 leaves for easier testing
-//     let leaves = vec![
-//         "leaf1".to_string(),
-//         "leaf2".to_string(),
-//     ];
-//     
-//     let merkle_tree = MerkleTree::new(leaves);
-//     let root = merkle_tree.get_root();
-//     
-//     // Verify that we get a root hash
-//     assert!(!root.is_empty());
-//     
-//     // Get proof for leaf1 (index 0)
-//     let proof = merkle_tree.get_proof(0);
-//     assert!(proof.is_some());
-//     
-//     let proof = proof.unwrap();
-//     // Verify the proof
-//     let is_valid = merkle_tree.verify_proof("leaf1", &proof);
-//     assert!(is_valid);
-//     
-//     // Also test the second leaf
-//     let proof2 = merkle_tree.get_proof(1).unwrap();
-//     let is_valid2 = merkle_tree.verify_proof("leaf2", &proof2);
-//     assert!(is_valid2);
-// }
+#[test]
+fn test_airdrop_status_tracking() {
+    let mut airdrop_contract = AirdropContract::new(10000.0);
+    
+    let recipients = vec![
+        ("user1".to_string(), 1000.0),
+        ("user2".to_string(), 2000.0),
+        ("user3".to_string(), 1500.0),
+    ];
+    
+    airdrop_contract.add_recipients(recipients).unwrap();
+    
+    // Initially no one has claimed
+    let status = airdrop_contract.get_status();
+    assert_eq!(status.total_recipients, 3);
+    assert_eq!(status.claimed_recipients, 0);
+    assert_eq!(status.distributed_amount, 4500.0);
+    
+    // User 1 claims
+    airdrop_contract.claim("user1").unwrap();
+    let status = airdrop_contract.get_status();
+    assert_eq!(status.claimed_recipients, 1);
+    
+    // User 2 claims
+    airdrop_contract.claim("user2").unwrap();
+    let status = airdrop_contract.get_status();
+    assert_eq!(status.claimed_recipients, 2);
+}
+
+#[test]
+fn test_batch_claiming() {
+    let mut airdrop_contract = AirdropContract::new(10000.0);
+    
+    let recipients = vec![
+        ("user1".to_string(), 1000.0),
+        ("user2".to_string(), 2000.0),
+        ("user3".to_string(), 1500.0),
+    ];
+    
+    airdrop_contract.add_recipients(recipients).unwrap();
+    
+    // Batch claim for user1 and user3
+    let users_to_claim = vec!["user1".to_string(), "user3".to_string()];
+    let result = airdrop_contract.batch_claim(users_to_claim);
+    assert!(result.is_ok());
+    
+    let claimed_amounts = result.unwrap();
+    assert_eq!(claimed_amounts.len(), 2);
+    
+    // Check that the right amounts were claimed
+    assert_eq!(claimed_amounts[0].1, 1000.0); // user1
+    assert_eq!(claimed_amounts[1].1, 1500.0); // user3
+    
+    // Check that user2 hasn't claimed yet
+    assert!(!airdrop_contract.is_claimed("user2"));
+    
+    // Check that user1 and user3 have claimed
+    assert!(airdrop_contract.is_claimed("user1"));
+    assert!(airdrop_contract.is_claimed("user3"));
+}
+
+#[test]
+fn test_airdrop_with_categories() {
+    let mut airdrop_contract = AirdropContract::new(10000.0);
+    
+    let recipients = vec![
+        ("user1".to_string(), 1000.0),
+        ("user2".to_string(), 2000.0),
+    ];
+    
+    // Add recipients with category
+    let result = airdrop_contract.add_recipients_with_category(recipients, Some("early_supporter".to_string()));
+    assert!(result.is_ok());
+    
+    // Check that categories are set
+    assert_eq!(airdrop_contract.get_user_category("user1"), Some(&"early_supporter".to_string()));
+    assert_eq!(airdrop_contract.get_user_category("user2"), Some(&"early_supporter".to_string()));
+}
+
+#[test]
+fn test_airdrop_pause_functionality() {
+    let mut airdrop_contract = AirdropContract::new(10000.0);
+    
+    let recipients = vec![("user1".to_string(), 1000.0)];
+    airdrop_contract.add_recipients(recipients).unwrap();
+    
+    // Initially not paused
+    assert!(!airdrop_contract.is_paused());
+    
+    // Pause the airdrop
+    airdrop_contract.pause();
+    assert!(airdrop_contract.is_paused());
+    
+    // Try to claim while paused - should fail
+    let result = airdrop_contract.claim("user1");
+    assert!(result.is_err());
+}

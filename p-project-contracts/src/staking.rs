@@ -60,6 +60,9 @@ pub struct StakingContract {
     staking_tiers: Vec<StakingTier>, // Different staking tiers with APY rates
     emergency_withdrawals_enabled: bool, // Emergency withdrawal feature flag
     rewards_config: StakingRewardsConfig, // Staking rewards configuration
+    // New fields for team staking incentives
+    team_member_boost: f64,          // Additional APY boost for team members
+    team_member_list: HashMap<String, bool>, // user_id -> is_team_member
 }
 
 impl StakingContract {
@@ -84,6 +87,13 @@ impl StakingContract {
                 duration_days: 365,
                 apy_rate: 0.20, // 20% APY
             },
+            // Special tier for team members
+            StakingTier {
+                name: "Team".to_string(),
+                min_amount: 1000.0,
+                duration_days: 180, // 6 months minimum for team members
+                apy_rate: 0.25, // 25% APY base rate
+            },
         ];
 
         // Initialize rewards configuration with halving schedule
@@ -103,6 +113,8 @@ impl StakingContract {
             staking_tiers: tiers,
             emergency_withdrawals_enabled: false,
             rewards_config,
+            team_member_boost: 0.05, // 5% additional APY for team members
+            team_member_list: HashMap::new(), // Initialize team member list
         }
     }
 
@@ -323,19 +335,28 @@ impl StakingContract {
         rewards
     }
 
-    /// Get APY rate for a specific staking position
+    /// Get APY rate for a specific staking position with team member boost
     fn get_apy_for_staking_info(&self, staking_info: &StakingInfo) -> f64 {
         // If tier_name is available, find matching tier
-        if let Some(tier_name) = &staking_info.tier_name {
+        let base_apy = if let Some(tier_name) = &staking_info.tier_name {
+            let mut found_apy = 0.05; // Default to basic 5% APY if no tier matches
             for tier in &self.staking_tiers {
                 if &tier.name == tier_name {
-                    return tier.apy_rate;
+                    found_apy = tier.apy_rate;
+                    break;
                 }
             }
-        }
+            found_apy
+        } else {
+            0.05 // Default to basic 5% APY if no tier matches
+        };
 
-        // Default to basic 5% APY if no tier matches
-        0.05
+        // Apply team member boost if applicable
+        if self.is_team_member(&staking_info.user_id) {
+            base_apy + self.team_member_boost
+        } else {
+            base_apy
+        }
     }
 
     /// Get staking info for a user
@@ -395,5 +416,68 @@ impl StakingContract {
     /// Get staking rewards configuration
     pub fn get_rewards_config(&self) -> &StakingRewardsConfig {
         &self.rewards_config
+    }
+
+    /// Add a user to the team member list for staking incentives
+    pub fn add_team_member(&mut self, user_id: String) {
+        self.team_member_list.insert(user_id, true);
+    }
+
+    /// Remove a user from the team member list
+    pub fn remove_team_member(&mut self, user_id: &str) {
+        self.team_member_list.remove(user_id);
+    }
+
+    /// Check if a user is a team member
+    pub fn is_team_member(&self, user_id: &str) -> bool {
+        *self.team_member_list.get(user_id).unwrap_or(&false)
+    }
+
+    /// Set team member APY boost
+    pub fn set_team_member_boost(&mut self, boost: f64) {
+        self.team_member_boost = boost;
+    }
+
+    /// Get team member APY boost
+    pub fn get_team_member_boost(&self) -> f64 {
+        self.team_member_boost
+    }
+
+    /// Calculate projected rewards for a staking position
+    pub fn calculate_projected_rewards(&self, amount: f64, duration_days: i64, tier_name: Option<&str>) -> f64 {
+        // Determine APY based on tier
+        let apy_rate = if let Some(tier_name) = tier_name {
+            let mut found_apy = 0.05; // Default to basic 5% APY if no tier matches
+            for tier in &self.staking_tiers {
+                if tier.name == tier_name {
+                    found_apy = tier.apy_rate;
+                    break;
+                }
+            }
+            found_apy
+        } else {
+            // Find the best matching tier based on amount and duration
+            let mut best_apy = 0.05; // Default to basic 5% APY
+            for tier in &self.staking_tiers {
+                if amount >= tier.min_amount && duration_days >= tier.duration_days {
+                    if tier.apy_rate > best_apy {
+                        best_apy = tier.apy_rate;
+                    }
+                }
+            }
+            best_apy
+        };
+
+        // Compound interest calculation: A = P(1 + r/n)^(nt)
+        // For simplicity, we'll use continuous compounding: A = Pe^(rt)
+        let years = duration_days as f64 / 365.0;
+        let rewards = amount * (f64::exp(apy_rate * years) - 1.0);
+
+        rewards
+    }
+
+    /// Get all staking tiers
+    pub fn get_all_staking_tiers(&self) -> &Vec<StakingTier> {
+        &self.staking_tiers
     }
 }

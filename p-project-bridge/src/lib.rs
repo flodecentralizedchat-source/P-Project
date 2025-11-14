@@ -19,6 +19,73 @@ use solana::SolanaAdapter;
 pub use store::{BoxedBridgeError, BridgeStore};
 use sui::SuiAdapter;
 
+// Wrapper struct to implement BridgeStore for Arc<MySqlDatabase>
+struct DatabaseWrapper {
+    db: Arc<MySqlDatabase>,
+}
+
+#[async_trait::async_trait]
+impl BridgeStore for DatabaseWrapper {
+    async fn create_bridge_tx(
+        &self,
+        id: &str,
+        user_id: &str,
+        token: &str,
+        from_chain: &str,
+        to_chain: &str,
+        amount: f64,
+        status: &str,
+    ) -> Result<(), BoxedBridgeError> {
+        self.db.as_ref().insert_bridge_tx(id, user_id, token, from_chain, to_chain, amount, status)
+            .await
+            .map_err(|e| Box::new(e) as BoxedBridgeError)
+    }
+
+    async fn set_bridge_src_tx(&self, id: &str, src_tx_hash: &str) -> Result<(), BoxedBridgeError> {
+        self.db.as_ref().update_bridge_src_tx(id, src_tx_hash)
+            .await
+            .map_err(|e| Box::new(e) as BoxedBridgeError)
+    }
+
+    async fn set_bridge_dst_tx(&self, id: &str, dst_tx_hash: &str) -> Result<(), BoxedBridgeError> {
+        self.db.as_ref().update_bridge_dst_tx(id, dst_tx_hash)
+            .await
+            .map_err(|e| Box::new(e) as BoxedBridgeError)
+    }
+
+    async fn set_bridge_lock_id(&self, id: &str, lock_id: &str) -> Result<(), BoxedBridgeError> {
+        self.db.as_ref().update_bridge_lock_id(id, lock_id)
+            .await
+            .map_err(|e| Box::new(e) as BoxedBridgeError)
+    }
+
+    async fn update_bridge_status(
+        &self,
+        id: &str,
+        status: &str,
+        error_msg: Option<&str>,
+    ) -> Result<(), BoxedBridgeError> {
+        self.db.as_ref().update_bridge_status_row(id, status, error_msg)
+            .await
+            .map_err(|e| Box::new(e) as BoxedBridgeError)
+    }
+
+    async fn get_bridge_tx(&self, id: &str) -> Result<p_project_core::models::BridgeTx, BoxedBridgeError> {
+        self.db.as_ref().fetch_bridge_tx(id)
+            .await
+            .map_err(|e| Box::new(e) as BoxedBridgeError)
+    }
+
+    async fn list_bridge_locked_without_dst(
+        &self,
+        from_chain: &str,
+    ) -> Result<Vec<p_project_core::models::BridgeTx>, BoxedBridgeError> {
+        self.db.as_ref().list_locked_without_dst(from_chain)
+            .await
+            .map_err(|e| Box::new(e) as BoxedBridgeError)
+    }
+}
+
 pub struct BridgeService {
     db: Arc<dyn BridgeStore + Send + Sync>,
     supported_chains: Vec<String>,
@@ -26,10 +93,11 @@ pub struct BridgeService {
 }
 
 impl BridgeService {
-    pub fn new(db: MySqlDatabase) -> Self {
+    pub fn new(db: Arc<MySqlDatabase>) -> Self {
         let cfg = BridgeConfig::from_env();
         let adapters = Self::build_default_adapters(&cfg);
-        Self::with_adapters(Arc::new(db), adapters)
+        let db_wrapper = DatabaseWrapper { db };
+        Self::with_adapters(Arc::new(db_wrapper), adapters)
     }
 
     pub fn with_adapters(

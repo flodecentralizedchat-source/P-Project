@@ -46,14 +46,27 @@ pub struct Proposal {
     pub created_at: chrono::NaiveDateTime,
     pub voting_end_time: chrono::NaiveDateTime,
     pub status: ProposalStatus,
+    // Execution details
+    pub execution_type: Option<ProposalExecutionType>,
+    pub execution_data: Option<String>, // JSON string with execution parameters
+    pub executed_at: Option<chrono::NaiveDateTime>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ProposalStatus {
     Active,
     Passed,
     Rejected,
     Executed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProposalExecutionType {
+    TokenTransfer,     // Transfer tokens from treasury
+    ParameterChange,   // Change system parameters
+    ContractUpgrade,   // Upgrade contract logic
+    Airdrop,           // Distribute tokens to users
+    StakingReward,     // Distribute staking rewards
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

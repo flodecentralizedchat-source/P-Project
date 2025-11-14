@@ -10,3 +10,4 @@ serde.workspace = true
 tokio.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
+uuid = { version = "1.0", features = ["v4"] }

@@ -1,0 +1,101 @@
+section,subgroup,label,field_1,field_2,field_3,field_4,field_5
+WALLET_ASSIGNMENT,FOUNDER,Founder 1,FOUNDER1_WALLET_ADDRESS_PLACEHOLDER,10.00%,"35,000,000","4-year vesting, 1-year cliff; monthly linear unlock",Signing: Multisig for major actions
+WALLET_ASSIGNMENT,FOUNDER,Founder 2,FOUNDER2_WALLET_ADDRESS_PLACEHOLDER,10.00%,"35,000,000","4-year vesting, 1-year cliff; monthly linear unlock",Signing: Multisig for major actions
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 1,MEMBER1_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 2,MEMBER2_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 3,MEMBER3_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 4,MEMBER4_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 5,MEMBER5_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 6,MEMBER6_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 7,MEMBER7_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 8,MEMBER8_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 9,MEMBER9_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 10,MEMBER10_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 11,MEMBER11_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 12,MEMBER12_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+WALLET_ASSIGNMENT,FOUNDING_MEMBER,Founding Member 13,MEMBER13_WALLET_ADDRESS_PLACEHOLDER,0.7692%,"2,692,307","3-year vesting, 6-month cliff; monthly linear unlock",Contributor role-based allocation
+INVESTORS,INVESTOR_BUCKET,Seed Round,TBD_INVESTOR_WALLET(S),7.00%,"24,500,000","18-month vesting, 3-month cliff",Subject to SAFT / token purchase agreements
+INVESTORS,INVESTOR_BUCKET,Private Round,TBD_INVESTOR_WALLET(S),5.00%,"17,500,000","24-month vesting, 6-month cliff",Subject to SAFT / token purchase agreements
+INVESTORS,INVESTOR_BUCKET,Public Sale / IDO,TBD_INVESTOR_WALLET(S),3.00%,"10,500,000","10% TGE, then 12-month linear",Subject to SAFT / token purchase agreements
+PRICE_SIMULATION,UNLOCK_CURVE,Year 1,"Unlocked 25.0% (87,500,000 tokens)","Target Market Cap: $14,000,000",Implied Price: $0.1600,Inputs adjustable: change MC/unlock% to explore scenarios,"Use this as planning, not financial advice"
+PRICE_SIMULATION,UNLOCK_CURVE,Year 2,"Unlocked 40.0% (140,000,000 tokens)","Target Market Cap: $35,000,000",Implied Price: $0.2500,Inputs adjustable: change MC/unlock% to explore scenarios,"Use this as planning, not financial advice"
+PRICE_SIMULATION,UNLOCK_CURVE,Year 3,"Unlocked 55.0% (192,500,000 tokens)","Target Market Cap: $70,000,000",Implied Price: $0.3636,Inputs adjustable: change MC/unlock% to explore scenarios,"Use this as planning, not financial advice"
+PRICE_SIMULATION,UNLOCK_CURVE,Year 4,"Unlocked 70.0% (244,999,999 tokens)","Target Market Cap: $175,000,000",Implied Price: $0.7143,Inputs adjustable: change MC/unlock% to explore scenarios,"Use this as planning, not financial advice"
+PRICE_SIMULATION,UNLOCK_CURVE,Year 5,"Unlocked 100.0% (350,000,000 tokens)","Target Market Cap: $350,000,000",Implied Price: $1.0000,Inputs adjustable: change MC/unlock% to explore scenarios,"Use this as planning, not financial advice"
+SMART_CONTRACT,SOLIDITY_VESTING,Linear vesting contract (copy to .sol),N/A,N/A,N/A,"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+interface IERC20 {
+    function transfer(address to, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
+}
+
+contract LinearVesting {
+    IERC20 public immutable token;
+    address public immutable beneficiary;
+    uint64 public immutable start;
+    uint64 public immutable cliff;
+    uint64 public immutable duration;
+    uint256 public immutable totalAllocation;
+    uint256 public released;
+
+    constructor(
+        IERC20 _token,
+        address _beneficiary,
+        uint64 _start,
+        uint64 _cliffDuration,
+        uint64 _duration,
+        uint256 _totalAllocation
+    ) {
+        require(_cliffDuration <= _duration, ""cliff > duration"");
+        token = _token;
+        beneficiary = _beneficiary;
+        start = _start;
+        cliff = _start + _cliffDuration;
+        duration = _duration;
+        totalAllocation = _totalAllocation;
+    }
+
+    function vestedAmount(uint64 timestamp) public view returns (uint256) {
+        if (timestamp < cliff) {
+            return 0;
+        } else if (timestamp >= start + duration) {
+            return totalAllocation;
+        } else {
+            uint64 elapsed = timestamp - start;
+            return (totalAllocation * elapsed) / duration;
+        }
+    }
+
+    function releasable() public view returns (uint256) {
+        return vestedAmount(uint64(block.timestamp)) - released;
+    }
+
+    function release() external {
+        require(msg.sender == beneficiary, ""not beneficiary"");
+        uint256 amount = releasable();
+        require(amount > 0, ""nothing to release"");
+        released += amount;
+        require(token.transfer(beneficiary, amount), ""transfer failed"");
+    }
+}
+",Deploy one instance per founder/member bucket with their allocation
+MERMAID,GOVERNANCE_DIAGRAM,Tokenomics Governance Diagram (Mermaid),Use in .md file with ```mermaid code block,N/A,N/A,"graph TD
+    A[Token Supply 350M] --> B[Founders 20%]
+    A --> C[Founding Members 10%]
+    A --> D[Investors 15%]
+    A --> E[Staking Rewards 20%]
+    A --> F[Ecosystem & Community 20%]
+    A --> G[Treasury & Reserve 15%]
+
+    B --> B1[4y Vesting, 1y Cliff]
+    C --> C1[3y Vesting, 6m Cliff]
+    D --> D1[Seed / Private / Public Buckets]
+    E --> E1[Emission Schedule]
+    F --> F1[Grants, Partnerships, Liquidity]
+    G --> G1[Governed by DAO / Multisig]
+
+    G1 --> H[On-chain Proposals]
+    H --> I[Community Vote]
+    I --> J[Treasury Execution]
+",Visual model of how supply flows & is governed

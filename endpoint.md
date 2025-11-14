@@ -12,6 +12,9 @@
 | `POST` | `/airdrop/claim` | Claim an airdrop allocation | ✅ Implemented |
 | `POST` | `/airdrop/create` | Create a new airdrop campaign | ✅ Implemented |
 | `POST` | `/airdrop/batch-claim` | Claim airdrops for multiple users | ✅ Implemented |
+| `POST` | `/bridge` | Bridge tokens between chains | ✅ Implemented |
+| `POST` | `/bridge/status` | Get bridge transaction status | ✅ Implemented |
+| `GET` | `/metrics` | Get performance metrics | ✅ Implemented |
 | `GET` | `/static/*` | Serve static files (`pkg/` assets) | ✅ Implemented |
 
 > All endpoints now include validation, persistence, and structured error responses; see `api.md` for usage notes and examples.

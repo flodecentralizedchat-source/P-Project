@@ -135,6 +135,37 @@ Choose one of the following setups.
       -d '{"airdrop_id":"airdrop1","user_id":"<user>"}'
     ```
 
+- POST /airdrop/batch-claim
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/airdrop/batch-claim \
+      -H 'Content-Type: application/json' \
+      -d '{"airdrop_id":"airdrop1","user_ids":["user1","user2","user3"]}'
+    ```
+
+- POST /bridge (bridge tokens between chains)
+  - curl:
+    ```bash
+    curl -X POST http://localhost:3000/bridge \
+      -H 'Content-Type: application/json' \
+      -d '{"user_id":"user1","from_chain":"Ethereum","to_chain":"Solana","amount":100.0}'
+    ```
+
+- POST /bridge/status (get bridge transaction status)
+  - curl:
+    ```bash
+
+    curl -X POST http://localhost:3000/bridge/status \
+      -H 'Content-Type: application/json' \
+      -d '{"transaction_id":"bridge-tx-123"}'
+    ```
+
+- GET /metrics (get performance metrics)
+  - curl:
+    ```bash
+    curl -X GET http://localhost:3000/metrics
+    ```
+
 Notes
 - Most endpoints currently return `501 Not Implemented` until business logic is wired in (see Endpoints section). `POST /users` is implemented and persists to MySQL.
 - Input validation: 400 if `username` is not 3-32 chars of `[A-Za-z0-9_-]`, or if `wallet_address` is not an Ethereum-style `0x`-prefixed, 42-char hex string.
@@ -229,6 +260,9 @@ Notes
 - `POST /airdrop/claim` – Claim an airdrop allocation (marks the recipient as claimed and returns the amount).
 - `POST /airdrop/create` – Register a new airdrop and its recipients, returns the new `airdrop_id`.
 - `POST /airdrop/batch-claim` – Claim airdrops for multiple users in one request, returns claimed amounts.
+- `POST /bridge` – Bridge tokens between chains (initiates a cross-chain token transfer).
+- `POST /bridge/status` – Get bridge transaction status (returns detailed status of a bridge transaction).
+- `GET /metrics` – Get performance metrics (returns server performance and health metrics).
 - `GET /static/*` – Serves files from `pkg/` (works in Docker build; local requires prebuilt `pkg/`).
 
 Request examples
@@ -278,7 +312,42 @@ Responses
     ]
   }
   ```
+- Bridge response:
+  ```json
+  {
+    "transaction_id": "bridge-tx-123",
+    "from_chain": "Ethereum",
+    "to_chain": "Solana",
+    "amount": 100.0,
+    "status": "Locked"
+  }
+  ```
+- Bridge status response:
+  ```json
+  {
+    "transaction_id": "bridge-tx-123",
+    "status": "Minted",
+    "from_chain": "Ethereum",
+    "to_chain": "Solana",
+    "amount": 100.0,
+    "lock_id": "lock-456",
+    "src_tx_hash": "0xabc123...",
+    "dst_tx_hash": "0xdef456...",
+    "error_msg": null
+  }
+  ```
+- Performance metrics response:
+  ```json
+  {
+    "uptime": 3600.0,
+    "total_requests": 1000,
+    "avg_response_time_ms": 45.5,
+    "active_connections": 10
+  }
+  ```
+
 ---
+
 ## Configuration Reference
 
 - Environment
@@ -384,3 +453,11 @@ This guide targets development usage. For production hardening, you'll want to l
 - POST `/airdrop/batch-claim`
   - 400 `{ "error": "no_user_ids" }` when the request omits recipients.
   - 500 `{ "error": "internal_error" }` for database errors.
+
+- POST `/bridge`
+  - 400 `{ "error": "invalid_amount" }` when the bridge amount isn't positive.
+  - 500 `{ "error": "bridge_error" }` when the bridge operation fails.
+  
+- POST `/bridge/status`
+  - 404 `{ "error": "transaction_not_found" }` when the transaction ID doesn't exist.
+  - 500 `{ "error": "internal_error" }` for database failures.
