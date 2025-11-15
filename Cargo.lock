@@ -3552,9 +3552,9 @@ dependencies = [
 
 [[package]]
 name = "kani-verifier"
-version = "0.63.0"
+version = "0.66.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac9331d342148be2d3d79d55baa60451b1b46a1c2c11374a7dfd0f9cb7811ec6"
+checksum = "07485e9dd5ec9dfb861681b98ef64ea1593a5dc0b9f7a49a490231dfdfcc0a19"
 dependencies = [
  "anyhow",
  "home",
