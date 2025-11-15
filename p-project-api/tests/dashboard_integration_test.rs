@@ -20,18 +20,38 @@ async fn test_dao_endpoints() {
     };
 
     // Initialize database
-    let db = MySqlDatabase::new(&db_url).await.expect("Failed to connect to database");
+    let db = MySqlDatabase::new(&db_url)
+        .await
+        .expect("Failed to connect to database");
     // Skip table initialization for this test as we're only testing routes
 
     let app_state = AppState { db: Arc::new(db) };
     let app = Router::new()
         // DAO endpoints
-        .route("/dao/proposals", axum::routing::post(handlers::create_proposal))
-        .route("/dao/proposals/vote", axum::routing::post(handlers::vote_on_proposal))
-        .route("/dao/proposals/tally", axum::routing::post(handlers::tally_votes))
-        .route("/dao/proposals/execute", axum::routing::post(handlers::execute_proposal))
-        .route("/dao/delegate", axum::routing::post(handlers::delegate_vote))
-        .route("/dao/proposals", axum::routing::get(handlers::get_proposals))
+        .route(
+            "/dao/proposals",
+            axum::routing::post(handlers::create_proposal),
+        )
+        .route(
+            "/dao/proposals/vote",
+            axum::routing::post(handlers::vote_on_proposal),
+        )
+        .route(
+            "/dao/proposals/tally",
+            axum::routing::post(handlers::tally_votes),
+        )
+        .route(
+            "/dao/proposals/execute",
+            axum::routing::post(handlers::execute_proposal),
+        )
+        .route(
+            "/dao/delegate",
+            axum::routing::post(handlers::delegate_vote),
+        )
+        .route(
+            "/dao/proposals",
+            axum::routing::get(handlers::get_proposals),
+        )
         .with_state(app_state);
 
     // Test create proposal endpoint
@@ -80,14 +100,22 @@ async fn test_staking_endpoints() {
     };
 
     // Initialize database
-    let db = MySqlDatabase::new(&db_url).await.expect("Failed to connect to database");
+    let db = MySqlDatabase::new(&db_url)
+        .await
+        .expect("Failed to connect to database");
     // Skip table initialization for this test as we're only testing routes
 
     let app_state = AppState { db: Arc::new(db) };
     let app = Router::new()
         // Staking endpoints
-        .route("/staking/yield", axum::routing::post(handlers::calculate_staking_yield))
-        .route("/staking/tiers", axum::routing::get(handlers::get_staking_tiers))
+        .route(
+            "/staking/yield",
+            axum::routing::post(handlers::calculate_staking_yield),
+        )
+        .route(
+            "/staking/tiers",
+            axum::routing::get(handlers::get_staking_tiers),
+        )
         .with_state(app_state);
 
     // Test calculate staking yield endpoint
@@ -98,9 +126,7 @@ async fn test_staking_endpoints() {
                 .method(http::Method::POST)
                 .uri("/staking/yield")
                 .header(http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"amount": 1000.0, "duration_days": 365}"#,
-                ))
+                .body(Body::from(r#"{"amount": 1000.0, "duration_days": 365}"#))
                 .unwrap(),
         )
         .await
@@ -136,14 +162,22 @@ async fn test_airdrop_endpoints() {
     };
 
     // Initialize database
-    let db = MySqlDatabase::new(&db_url).await.expect("Failed to connect to database");
+    let db = MySqlDatabase::new(&db_url)
+        .await
+        .expect("Failed to connect to database");
     // Skip table initialization for this test as we're only testing routes
 
     let app_state = AppState { db: Arc::new(db) };
     let app = Router::new()
         // Airdrop endpoints
-        .route("/airdrop/status", axum::routing::get(handlers::get_airdrop_status))
-        .route("/airdrop/recipients", axum::routing::get(handlers::get_airdrop_recipients))
+        .route(
+            "/airdrop/status",
+            axum::routing::get(handlers::get_airdrop_status),
+        )
+        .route(
+            "/airdrop/recipients",
+            axum::routing::get(handlers::get_airdrop_recipients),
+        )
         .with_state(app_state);
 
     // Test get airdrop status endpoint

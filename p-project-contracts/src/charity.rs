@@ -1,3 +1,4 @@
+use crate::stable_liquidity_pool::StableLiquidityPool;
 use crate::token::PProjectToken;
 use chrono::{Datelike, NaiveDateTime, Utc};
 use p_project_core::utils::generate_id;
@@ -27,6 +28,7 @@ pub enum CharityError {
     CreditNotFound,
     InsufficientCreditBalance,
     CreditExpired,
+    DistributionRuleMissing,
 }
 
 impl std::fmt::Display for CharityError {
@@ -56,6 +58,7 @@ impl std::fmt::Display for CharityError {
             CharityError::CreditNotFound => write!(f, "Credit not found"),
             CharityError::InsufficientCreditBalance => write!(f, "Insufficient credit balance"),
             CharityError::CreditExpired => write!(f, "Credit has expired"),
+            CharityError::DistributionRuleMissing => write!(f, "No distribution rules configured"),
         }
     }
 }
@@ -125,15 +128,15 @@ pub struct AidVoucher {
     pub id: String,
     pub beneficiary_id: String, // Could be refugee ID, disaster victim ID, etc.
     pub beneficiary_address: String, // Wallet address of the beneficiary
-    pub aid_type: String, // "food", "medicine", "water", "shelter", etc.
-    pub amount: f64, // Value of the voucher in P-Coin
-    pub issued_by: String, // NGO or DAO address that issued the voucher
+    pub aid_type: String,       // "food", "medicine", "water", "shelter", etc.
+    pub amount: f64,            // Value of the voucher in P-Coin
+    pub issued_by: String,      // NGO or DAO address that issued the voucher
     pub issued_at: NaiveDateTime,
     pub expires_at: Option<NaiveDateTime>, // Optional expiration date
-    pub claimed: bool, // Whether the voucher has been claimed/redeemed
+    pub claimed: bool,                     // Whether the voucher has been claimed/redeemed
     pub claimed_at: Option<NaiveDateTime>, // When the voucher was claimed
-    pub tx_hash: Option<String>, // Transaction hash of the claim
-    pub zone_type: String, // "war", "disaster", "refugee_camp", etc.
+    pub tx_hash: Option<String>,           // Transaction hash of the claim
+    pub zone_type: String,                 // "war", "disaster", "refugee_camp", etc.
 }
 
 // Peace-relief credit for refugees
@@ -142,11 +145,11 @@ pub struct PeaceReliefCredit {
     pub id: String,
     pub refugee_id: String,
     pub wristband_id: Option<String>, // Optional NFC wristband ID for refugee camps
-    pub amount: f64, // Credit amount in P-Coin
-    pub issued_by: String, // NGO or DAO address that issued the credit
+    pub amount: f64,                  // Credit amount in P-Coin
+    pub issued_by: String,            // NGO or DAO address that issued the credit
     pub issued_at: NaiveDateTime,
     pub expires_at: Option<NaiveDateTime>, // Optional expiration date
-    pub balance: f64, // Remaining balance
+    pub balance: f64,                      // Remaining balance
     pub transactions: Vec<CreditTransaction>, // Transaction history
 }
 
@@ -209,53 +212,85 @@ pub struct LeaderboardEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DistributionRule {
+    pub ngo_address: String,
+    pub weight: f64,
+    pub purpose: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEvent {
+    pub id: String,
+    pub timestamp: NaiveDateTime,
+    pub action: String,
+    pub entity: String,
+    pub amount: f64,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardSummary {
+    pub total_donations: f64,
+    pub total_allocations: f64,
+    pub fund_balance: f64,
+    pub ngo_allocations: Vec<(String, f64)>,
+    pub top_donors: Vec<(String, f64)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharityAllocator {
     // Charity fund balance
     fund_balance: f64,
-    
+
     // Registry of NGOs
     ngos: HashMap<String, NGO>, // address -> NGO
-    
+
     // Allocations to NGOs
     allocations: HashMap<String, Allocation>, // allocation_id -> Allocation
-    
+
     // Donation records for tracking
     donation_records: HashMap<String, DonationRecord>, // donation_id -> DonationRecord
-    
+
     // Crowdfund campaigns
     campaigns: HashMap<String, CrowdfundCampaign>, // campaign_id -> CrowdfundCampaign
-    
+
     // Aid vouchers for humanitarian assistance
     aid_vouchers: HashMap<String, AidVoucher>, // voucher_id -> AidVoucher
-    
+
     // Peace-relief credits for refugees
     peace_relief_credits: HashMap<String, PeaceReliefCredit>, // credit_id -> PeaceReliefCredit
-    
+
     // Proof-of-Peace badges
     proof_of_peace_badges: HashMap<String, ProofOfPeaceBadge>, // badge_id -> ProofOfPeaceBadge
-    
+
     // Donor reputation scores
     donor_reputations: HashMap<String, DonorReputation>, // donor_address -> DonorReputation
-    
+
     // NGO impact records
     ngo_impact_records: HashMap<String, NGOImpactRecord>, // ngo_address -> NGOImpactRecord
-    
+
     // Leaderboard cache
     donor_leaderboard: Vec<LeaderboardEntry>,
     ngo_leaderboard: Vec<LeaderboardEntry>,
-    
+
+    // Accounting audit trail
+    audit_trail: Vec<AuditEvent>,
+
+    // Donation distribution configuration
+    distribution_rules: Vec<DistributionRule>,
+
     // Badge counter for ID generation
     badge_counter: u64,
-    
+
     // DAO address that controls this contract
     dao_address: String,
-    
+
     // Maximum percentage that can be allocated per month (2% as per tokenomics)
     max_monthly_allocation_percent: f64,
-    
+
     // Total amount disbursed this month
     monthly_disbursed_amount: f64,
-    
+
     // Start of current month for allocation tracking
     current_month_start: NaiveDateTime,
 }
@@ -263,11 +298,7 @@ pub struct CharityAllocator {
 impl CharityAllocator {
     pub fn new(dao_address: String, initial_fund_balance: f64) -> Self {
         let now = Utc::now().naive_utc();
-        let start_of_month = NaiveDateTime::from_timestamp_opt(
-            now.timestamp(),
-            0,
-        )
-        .unwrap_or(now);
+        let start_of_month = NaiveDateTime::from_timestamp_opt(now.timestamp(), 0).unwrap_or(now);
 
         Self {
             fund_balance: initial_fund_balance,
@@ -282,6 +313,8 @@ impl CharityAllocator {
             ngo_impact_records: HashMap::new(),
             donor_leaderboard: Vec::new(),
             ngo_leaderboard: Vec::new(),
+            audit_trail: Vec::new(),
+            distribution_rules: Vec::new(),
             badge_counter: 0,
             dao_address,
             max_monthly_allocation_percent: 0.02, // 2% per month
@@ -300,6 +333,18 @@ impl CharityAllocator {
         &self.dao_address
     }
 
+    fn log_audit_event(&mut self, action: String, entity: String, amount: f64, details: String) {
+        let event = AuditEvent {
+            id: format!("audit_{}", generate_id()),
+            timestamp: Utc::now().naive_utc(),
+            action,
+            entity,
+            amount,
+            details,
+        };
+        self.audit_trail.push(event);
+    }
+
     /// Add funds to the charity fund (only callable by DAO)
     pub fn add_funds(&mut self, amount: f64) -> Result<(), CharityError> {
         if amount <= 0.0 {
@@ -307,6 +352,12 @@ impl CharityAllocator {
         }
 
         self.fund_balance += amount;
+        self.log_audit_event(
+            "fund_added".to_string(),
+            "charity_pool".to_string(),
+            amount,
+            "DAO funding".to_string(),
+        );
         Ok(())
     }
 
@@ -446,6 +497,12 @@ impl CharityAllocator {
         };
 
         self.allocations.insert(allocation_id.clone(), allocation);
+        self.log_audit_event(
+            "allocation_created".to_string(),
+            allocation_id.clone(),
+            amount,
+            "Allocation created via DAO".to_string(),
+        );
         Ok(allocation_id)
     }
 
@@ -504,6 +561,85 @@ impl CharityAllocator {
         }
     }
 
+    /// Disburse funds to an NGO using a stable liquidity pool to swap P-COIN -> stable (e.g., USDC)
+    /// This method simulates a low-slippage payout path for NGOs operating in fiat-equivalent terms.
+    /// Returns (tx_hash) on success and uses the stable pool price to compute the stable amount.
+    pub fn disburse_with_stable_pool(
+        &mut self,
+        caller: &str,
+        allocation_id: &str,
+        stable_pool: &mut StableLiquidityPool,
+    ) -> Result<(String, f64), CharityError> {
+        // Only DAO can disburse funds
+        if caller != self.dao_address {
+            return Err(CharityError::UnauthorizedAccess);
+        }
+
+        // Check allocation exists and not disbursed
+        let allocation = self
+            .allocations
+            .get(allocation_id)
+            .ok_or(CharityError::AllocationNotFound)?;
+        if allocation.disbursed {
+            return Err(CharityError::AllocationAlreadyDisbursed);
+        }
+
+        // Validate fund balance
+        if allocation.amount > self.fund_balance {
+            return Err(CharityError::InsufficientFunds);
+        }
+
+        // Check NGO exists and is verified
+        let ngo_address = allocation.ngo_address.clone();
+        let ngo = self
+            .ngos
+            .get(&ngo_address)
+            .ok_or(CharityError::NGONotFound)?;
+        if !ngo.verified {
+            return Err(CharityError::NGONotFound);
+        }
+
+        // Clone the values we need to avoid borrowing conflicts
+        let token_a = stable_pool.config.token_a.clone();
+        let allocation_amount = allocation.amount;
+
+        // Use the stable pool to calculate and execute the swap from P-COIN to USDC
+        // We assume token_a is P-COIN and token_b is the stable token in pool config.
+        let usdc_out = match stable_pool.swap(&token_a, allocation_amount) {
+            Ok(v) => v,
+            Err(_) => return Err(CharityError::InsufficientFunds),
+        };
+
+        // Deduct fund balance
+        self.fund_balance -= allocation_amount;
+
+        // Get mutable reference to allocation and update it
+        let allocation = self.allocations.get_mut(allocation_id).unwrap();
+        allocation.disbursed = true;
+        allocation.disbursement_tx_hash =
+            Some(format!("tx_{}", p_project_core::utils::generate_id()));
+        allocation.disbursed_at = Some(Utc::now().naive_utc());
+
+        // Store values we need for logging
+        let allocation_id_clone = allocation_id.to_string();
+        let allocation_amount_for_log = allocation.amount;
+        let tx_hash = allocation.disbursement_tx_hash.clone().unwrap();
+        drop(allocation); // Release the mutable reference
+
+        self.log_audit_event(
+            "allocation_disbursed".to_string(),
+            allocation_id_clone,
+            allocation_amount_for_log,
+            "Funds delivered via stable pool".to_string(),
+        );
+
+        // Update monthly tracking
+        self.update_monthly_tracking();
+        self.monthly_disbursed_amount += allocation_amount;
+
+        Ok((tx_hash, usdc_out))
+    }
+
     /// Record a donation (callable by anyone)
     pub fn record_donation(
         &mut self,
@@ -544,6 +680,14 @@ impl CharityAllocator {
 
         self.donation_records.insert(donation_id.clone(), donation);
 
+        self.fund_balance += amount;
+        self.log_audit_event(
+            "donation_recorded".to_string(),
+            donor_address.clone(),
+            amount,
+            format!("Donation recorded for NGO {}", ngo_address),
+        );
+
         // If this is for a campaign, update the campaign
         if let Some(campaign_id) = campaign_id.clone() {
             if let Some(campaign) = self.campaigns.get_mut(&campaign_id) {
@@ -553,19 +697,158 @@ impl CharityAllocator {
                 }
             }
         }
-        
+
         // Update donor reputation and issue Proof-of-Peace badge
-        self.update_donor_reputation(&donor_address, amount, &ngo_address, campaign_id.clone(), &tx_hash)?;
-        
+        self.update_donor_reputation(
+            &donor_address,
+            amount,
+            &ngo_address,
+            campaign_id.clone(),
+            &tx_hash,
+        )?;
+
         // Update NGO impact record
         self.update_ngo_impact_record(&ngo_address, amount)?;
-        
+
         // Update leaderboards
         self.update_leaderboards();
 
         Ok(donation_id)
     }
-    
+
+    /// Configure the automated donation distribution rules.
+    pub fn set_distribution_rules(
+        &mut self,
+        rules: Vec<DistributionRule>,
+    ) -> Result<(), CharityError> {
+        if rules.is_empty() {
+            return Err(CharityError::DistributionRuleMissing);
+        }
+
+        if rules.iter().any(|rule| rule.weight <= 0.0) {
+            return Err(CharityError::InvalidAmount);
+        }
+
+        self.distribution_rules = rules;
+        self.log_audit_event(
+            "distribution_rules_updated".to_string(),
+            "charity_allocator".to_string(),
+            0.0,
+            "Automated distribution rules updated".to_string(),
+        );
+
+        Ok(())
+    }
+
+    /// Automatically distributes donations to NGOs based on configured rules.
+    pub fn automate_donation_distribution(
+        &mut self,
+        donor_address: String,
+        amount: f64,
+        tx_hash: String,
+        message: Option<String>,
+    ) -> Result<Vec<(String, f64, String)>, CharityError> {
+        if amount <= 0.0 {
+            return Err(CharityError::InvalidAmount);
+        }
+
+        // Validate that we have distribution rules
+        if self.distribution_rules.is_empty() {
+            return Err(CharityError::DistributionRuleMissing);
+        }
+
+        let total_weight: f64 = self.distribution_rules.iter().map(|rule| rule.weight).sum();
+        if total_weight <= 0.0 {
+            return Err(CharityError::InvalidAmount);
+        }
+
+        let mut allocations = Vec::new();
+
+        // Collect all the data we need before making any mutable calls
+        let mut distribution_data = Vec::new();
+        for rule in &self.distribution_rules {
+            let share = amount * (rule.weight / total_weight);
+            if share <= 0.0 {
+                continue;
+            }
+
+            distribution_data.push((rule.ngo_address.clone(), rule.purpose.clone(), share));
+        }
+
+        // Clone the DAO address to avoid borrowing conflicts
+        let dao_address = self.dao_address.clone();
+
+        // Now make the mutable calls
+        for (ngo_address, purpose, share) in distribution_data {
+            let donation_id = self.record_donation(
+                donor_address.clone(),
+                ngo_address.clone(),
+                share,
+                format!("{}-{}", tx_hash, ngo_address),
+                None,
+                message.clone(),
+            )?;
+
+            let allocation_id = self.allocate(&dao_address, ngo_address.clone(), share, purpose)?;
+
+            self.log_audit_event(
+                "auto_distribution".to_string(),
+                ngo_address.clone(),
+                share,
+                format!(
+                    "Automated donation {} distributed via allocation {}",
+                    donation_id, allocation_id
+                ),
+            );
+
+            allocations.push((ngo_address, share, allocation_id));
+        }
+
+        Ok(allocations)
+    }
+
+    /// Returns aggregated dashboard data for public reporting.
+    pub fn get_dashboard_summary(&self, top_n: usize) -> DashboardSummary {
+        let total_donations = self
+            .donation_records
+            .values()
+            .map(|record| record.amount)
+            .sum();
+        let total_allocations = self.allocations.values().map(|alloc| alloc.amount).sum();
+
+        let mut ngo_allocations: HashMap<String, f64> = HashMap::new();
+        for allocation in self.allocations.values() {
+            *ngo_allocations
+                .entry(allocation.ngo_address.clone())
+                .or_insert(0.0) += allocation.amount;
+        }
+        let mut ngo_allocations: Vec<(String, f64)> = ngo_allocations.into_iter().collect();
+        ngo_allocations.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut donor_totals: HashMap<String, f64> = HashMap::new();
+        for donation in self.donation_records.values() {
+            *donor_totals
+                .entry(donation.donor_address.clone())
+                .or_insert(0.0) += donation.amount;
+        }
+        let mut donor_totals: Vec<(String, f64)> = donor_totals.into_iter().collect();
+        donor_totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        donor_totals.truncate(top_n);
+
+        DashboardSummary {
+            total_donations,
+            total_allocations,
+            fund_balance: self.fund_balance,
+            ngo_allocations,
+            top_donors: donor_totals,
+        }
+    }
+
+    /// Provides the most recent audit events for transparency dashboards.
+    pub fn get_recent_audit_events(&self, limit: usize) -> Vec<&AuditEvent> {
+        self.audit_trail.iter().rev().take(limit).collect()
+    }
+
     /// Update donor reputation score and issue Proof-of-Peace badge
     fn update_donor_reputation(
         &mut self,
@@ -576,22 +859,23 @@ impl CharityAllocator {
         tx_hash: &str,
     ) -> Result<(), CharityError> {
         // Get or create donor reputation
-        let donor_rep = self.donor_reputations.entry(donor_address.to_string()).or_insert_with(|| {
-            DonorReputation {
+        let donor_rep = self
+            .donor_reputations
+            .entry(donor_address.to_string())
+            .or_insert_with(|| DonorReputation {
                 donor_address: donor_address.to_string(),
                 score: 0.0,
                 total_donations: 0.0,
                 donation_count: 0,
                 badges_earned: Vec::new(),
                 last_updated: Utc::now().naive_utc(),
-            }
-        });
-        
+            });
+
         // Update donation statistics
         donor_rep.total_donations += amount;
         donor_rep.donation_count += 1;
         donor_rep.last_updated = Utc::now().naive_utc();
-        
+
         // Calculate badge type based on donation amount
         let badge_type = if amount >= 1000.0 {
             "platinum"
@@ -602,11 +886,11 @@ impl CharityAllocator {
         } else {
             "bronze"
         };
-        
+
         // Issue Proof-of-Peace badge
         self.badge_counter += 1;
         let badge_id = format!("badge_{}", self.badge_counter);
-        
+
         let badge = ProofOfPeaceBadge {
             id: badge_id.clone(),
             donor_address: donor_address.to_string(),
@@ -618,20 +902,24 @@ impl CharityAllocator {
             tx_hash: tx_hash.to_string(),
             metadata_uri: None, // In a real implementation, this would point to IPFS metadata
         };
-        
+
         self.proof_of_peace_badges.insert(badge_id.clone(), badge);
         donor_rep.badges_earned.push(badge_id.clone());
-        
+
         // Update donor score based on donation amount and frequency
         // Simple scoring algorithm: base points + amount bonus + consistency bonus
         let base_points = 10.0;
         let amount_bonus = amount.min(1000.0) / 10.0; // Cap at 100 points for large donations
-        let consistency_bonus = if donor_rep.donation_count > 1 { 5.0 } else { 0.0 };
+        let consistency_bonus = if donor_rep.donation_count > 1 {
+            5.0
+        } else {
+            0.0
+        };
         donor_rep.score += base_points + amount_bonus + consistency_bonus;
-        
+
         Ok(())
     }
-    
+
     /// Update NGO impact record
     fn update_ngo_impact_record(
         &mut self,
@@ -639,40 +927,42 @@ impl CharityAllocator {
         amount: f64,
     ) -> Result<(), CharityError> {
         // Get or create NGO impact record
-        let ngo_impact = self.ngo_impact_records.entry(ngo_address.to_string()).or_insert_with(|| {
-            NGOImpactRecord {
+        let ngo_impact = self
+            .ngo_impact_records
+            .entry(ngo_address.to_string())
+            .or_insert_with(|| NGOImpactRecord {
                 ngo_address: ngo_address.to_string(),
                 total_received: 0.0,
                 donor_count: 0,
                 campaign_count: 0,
                 badges_issued: 0,
                 last_updated: Utc::now().naive_utc(),
-            }
-        });
-        
+            });
+
         // Update statistics
         ngo_impact.total_received += amount;
         ngo_impact.donor_count += 1; // Simplified - in reality we'd track unique donors
         ngo_impact.badges_issued += 1; // Increment for the badge we just issued
         ngo_impact.last_updated = Utc::now().naive_utc();
-        
+
         Ok(())
     }
-    
+
     /// Update leaderboards
     fn update_leaderboards(&mut self) {
         // Update donor leaderboard
-        let mut donor_scores: Vec<(String, f64, String)> = self.donor_reputations
+        let mut donor_scores: Vec<(String, f64, String)> = self
+            .donor_reputations
             .iter()
             .map(|(address, rep)| {
                 let name = format!("Donor_{}", &address[..6]); // Simplified name
                 (address.clone(), rep.score, name)
             })
             .collect();
-        
+
         // Sort by score descending
         donor_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         // Create leaderboard entries
         self.donor_leaderboard = donor_scores
             .into_iter()
@@ -685,12 +975,15 @@ impl CharityAllocator {
                 category: "donor".to_string(),
             })
             .collect();
-        
+
         // Update NGO leaderboard
-        let mut ngo_scores: Vec<(String, f64, String)> = self.ngo_impact_records
+        let mut ngo_scores: Vec<(String, f64, String)> = self
+            .ngo_impact_records
             .iter()
             .map(|(address, impact)| {
-                let ngo_name = self.ngos.get(address)
+                let ngo_name = self
+                    .ngos
+                    .get(address)
                     .map(|ngo| ngo.name.clone())
                     .unwrap_or_else(|| format!("NGO_{}", &address[..6]));
                 // Score based on total received and donor count
@@ -698,10 +991,10 @@ impl CharityAllocator {
                 (address.clone(), score, ngo_name)
             })
             .collect();
-        
+
         // Sort by score descending
         ngo_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         // Create leaderboard entries
         self.ngo_leaderboard = ngo_scores
             .into_iter()
@@ -715,22 +1008,22 @@ impl CharityAllocator {
             })
             .collect();
     }
-    
+
     /// Get donor reputation
     pub fn get_donor_reputation(&self, donor_address: &str) -> Option<&DonorReputation> {
         self.donor_reputations.get(donor_address)
     }
-    
+
     /// Get NGO impact record
     pub fn get_ngo_impact_record(&self, ngo_address: &str) -> Option<&NGOImpactRecord> {
         self.ngo_impact_records.get(ngo_address)
     }
-    
+
     /// Get Proof-of-Peace badge
     pub fn get_proof_of_peace_badge(&self, badge_id: &str) -> Option<&ProofOfPeaceBadge> {
         self.proof_of_peace_badges.get(badge_id)
     }
-    
+
     /// Get all badges for a donor
     pub fn get_donor_badges(&self, donor_address: &str) -> Vec<&ProofOfPeaceBadge> {
         self.proof_of_peace_badges
@@ -738,32 +1031,36 @@ impl CharityAllocator {
             .filter(|badge| badge.donor_address == donor_address)
             .collect()
     }
-    
+
     /// Get donor leaderboard
     pub fn get_donor_leaderboard(&self, limit: Option<u32>) -> Vec<&LeaderboardEntry> {
         let limit = limit.unwrap_or(100) as usize;
         self.donor_leaderboard.iter().take(limit).collect()
     }
-    
+
     /// Get NGO leaderboard
     pub fn get_ngo_leaderboard(&self, limit: Option<u32>) -> Vec<&LeaderboardEntry> {
         let limit = limit.unwrap_or(100) as usize;
         self.ngo_leaderboard.iter().take(limit).collect()
     }
-    
+
     /// Get combined leaderboard
     pub fn get_combined_leaderboard(&self, limit: Option<u32>) -> Vec<&LeaderboardEntry> {
         let mut combined: Vec<&LeaderboardEntry> = Vec::new();
         combined.extend(&self.donor_leaderboard);
         combined.extend(&self.ngo_leaderboard);
-        
+
         // Sort by score descending
-        combined.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        
+        combined.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
         let limit = limit.unwrap_or(100) as usize;
         combined.into_iter().take(limit).collect()
     }
-    
+
     /// Get donation record
     pub fn get_donation_record(&self, donation_id: &str) -> Option<&DonationRecord> {
         self.donation_records.get(donation_id)
@@ -928,7 +1225,7 @@ impl CharityAllocator {
     pub fn get_max_monthly_allocation(&self) -> f64 {
         self.fund_balance * self.max_monthly_allocation_percent
     }
-    
+
     /// Create an aid voucher for humanitarian assistance (only callable by DAO or verified NGOs)
     pub fn create_aid_voucher(
         &mut self,
@@ -951,22 +1248,21 @@ impl CharityAllocator {
                 return Err(CharityError::UnauthorizedAccess);
             }
         }
-        
+
         // Check amount is valid
         if amount <= 0.0 {
             return Err(CharityError::InvalidAmount);
         }
-        
+
         // Check if there's enough in the fund
         if amount > self.fund_balance {
             return Err(CharityError::InsufficientFunds);
         }
-        
+
         // Create expiration date if specified
-        let expires_at = expiration_days.map(|days| {
-            Utc::now().naive_utc() + chrono::Duration::days(days)
-        });
-        
+        let expires_at =
+            expiration_days.map(|days| Utc::now().naive_utc() + chrono::Duration::days(days));
+
         // Create aid voucher
         let voucher_id = format!("voucher_{}", generate_id());
         let voucher = AidVoucher {
@@ -983,16 +1279,16 @@ impl CharityAllocator {
             tx_hash: None,
             zone_type,
         };
-        
+
         self.aid_vouchers.insert(voucher_id.clone(), voucher);
         Ok(voucher_id)
     }
-    
+
     /// Get aid voucher information
     pub fn get_aid_voucher(&self, voucher_id: &str) -> Option<&AidVoucher> {
         self.aid_vouchers.get(voucher_id)
     }
-    
+
     /// Get all aid vouchers for a beneficiary
     pub fn get_beneficiary_vouchers(&self, beneficiary_id: &str) -> Vec<&AidVoucher> {
         self.aid_vouchers
@@ -1000,7 +1296,7 @@ impl CharityAllocator {
             .filter(|voucher| voucher.beneficiary_id == beneficiary_id)
             .collect()
     }
-    
+
     /// Claim an aid voucher (callable by the beneficiary)
     pub fn claim_aid_voucher(
         &mut self,
@@ -1009,19 +1305,21 @@ impl CharityAllocator {
         token_contract: &mut PProjectToken,
     ) -> Result<String, CharityError> {
         // Check if voucher exists
-        let voucher = self.aid_vouchers.get(voucher_id)
+        let voucher = self
+            .aid_vouchers
+            .get(voucher_id)
             .ok_or(CharityError::VoucherNotFound)?;
-        
+
         // Check if caller is the beneficiary
         if caller != voucher.beneficiary_address {
             return Err(CharityError::UnauthorizedAccess);
         }
-        
+
         // Check if voucher is already claimed
         if voucher.claimed {
             return Err(CharityError::VoucherAlreadyClaimed);
         }
-        
+
         // Check if voucher is expired
         if let Some(expires_at) = voucher.expires_at {
             let now = Utc::now().naive_utc();
@@ -1029,29 +1327,29 @@ impl CharityAllocator {
                 return Err(CharityError::VoucherExpired);
             }
         }
-        
+
         let amount = voucher.amount;
         let beneficiary_address = voucher.beneficiary_address.clone();
-        
+
         // Transfer tokens to beneficiary
         match token_contract.transfer("charity_allocator", &beneficiary_address, amount) {
             Ok(_) => {
                 // Update fund balance
                 self.fund_balance -= amount;
-                
+
                 // Update voucher as claimed
                 let voucher = self.aid_vouchers.get_mut(voucher_id).unwrap();
                 voucher.claimed = true;
                 voucher.claimed_at = Some(Utc::now().naive_utc());
                 voucher.tx_hash = Some(format!("tx_{}", generate_id()));
-                
+
                 let tx_hash = voucher.tx_hash.clone().unwrap();
                 Ok(tx_hash)
-            },
+            }
             Err(e) => Err(CharityError::TokenOperationFailed(e.to_string())),
         }
     }
-    
+
     /// Create a peace-relief credit for refugees (only callable by DAO or verified NGOs)
     pub fn create_peace_relief_credit(
         &mut self,
@@ -1072,25 +1370,24 @@ impl CharityAllocator {
                 return Err(CharityError::UnauthorizedAccess);
             }
         }
-        
+
         // Check amount is valid
         if amount <= 0.0 {
             return Err(CharityError::InvalidAmount);
         }
-        
+
         // Check if there's enough in the fund
         if amount > self.fund_balance {
             return Err(CharityError::InsufficientFunds);
         }
-        
+
         // Create expiration date if specified
-        let expires_at = expiration_days.map(|days| {
-            Utc::now().naive_utc() + chrono::Duration::days(days)
-        });
-        
+        let expires_at =
+            expiration_days.map(|days| Utc::now().naive_utc() + chrono::Duration::days(days));
+
         // Create peace-relief credit
         let credit_id = format!("credit_{}", generate_id());
-        
+
         // Create initial credit transaction
         let transaction_id = format!("tx_{}", generate_id());
         let credit_transaction = CreditTransaction {
@@ -1102,7 +1399,7 @@ impl CharityAllocator {
             timestamp: Utc::now().naive_utc(),
             tx_hash: Some(format!("tx_{}", generate_id())),
         };
-        
+
         let credit = PeaceReliefCredit {
             id: credit_id.clone(),
             refugee_id,
@@ -1114,16 +1411,16 @@ impl CharityAllocator {
             balance: amount,
             transactions: vec![credit_transaction],
         };
-        
+
         self.peace_relief_credits.insert(credit_id.clone(), credit);
         Ok(credit_id)
     }
-    
+
     /// Get peace-relief credit information
     pub fn get_peace_relief_credit(&self, credit_id: &str) -> Option<&PeaceReliefCredit> {
         self.peace_relief_credits.get(credit_id)
     }
-    
+
     /// Get all peace-relief credits for a refugee
     pub fn get_refugee_credits(&self, refugee_id: &str) -> Vec<&PeaceReliefCredit> {
         self.peace_relief_credits
@@ -1131,7 +1428,7 @@ impl CharityAllocator {
             .filter(|credit| credit.refugee_id == refugee_id)
             .collect()
     }
-    
+
     /// Use peace-relief credit for purchases (callable by the refugee)
     pub fn use_peace_relief_credit(
         &mut self,
@@ -1142,14 +1439,16 @@ impl CharityAllocator {
         _token_contract: &mut PProjectToken,
     ) -> Result<String, CharityError> {
         // Check if credit exists
-        let credit = self.peace_relief_credits.get(credit_id)
+        let credit = self
+            .peace_relief_credits
+            .get(credit_id)
             .ok_or(CharityError::CreditNotFound)?;
-        
+
         // Check if caller is the refugee
         if caller != credit.refugee_id {
             return Err(CharityError::UnauthorizedAccess);
         }
-        
+
         // Check if credit is expired
         if let Some(expires_at) = credit.expires_at {
             let now = Utc::now().naive_utc();
@@ -1157,23 +1456,23 @@ impl CharityAllocator {
                 return Err(CharityError::CreditExpired);
             }
         }
-        
+
         // Check if there's enough balance
         if amount > credit.balance {
             return Err(CharityError::InsufficientCreditBalance);
         }
-        
+
         // For peace-relief credits, we're not actually transferring tokens to a merchant
         // Instead, we're deducting from the credit balance as if the tokens were spent
         // In a real implementation, this would involve actual merchant payments
-        
+
         // Update fund balance
         self.fund_balance -= amount;
-        
+
         // Update credit balance
         let credit = self.peace_relief_credits.get_mut(credit_id).unwrap();
         credit.balance -= amount;
-        
+
         // Create transaction record
         let transaction_id = format!("tx_{}", generate_id());
         let transaction = CreditTransaction {
@@ -1185,9 +1484,9 @@ impl CharityAllocator {
             timestamp: Utc::now().naive_utc(),
             tx_hash: Some(format!("tx_{}", generate_id())),
         };
-        
+
         credit.transactions.push(transaction);
-        
+
         let tx_hash = credit.transactions.last().unwrap().tx_hash.clone().unwrap();
         Ok(tx_hash)
     }

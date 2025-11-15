@@ -446,4 +446,20 @@ mod tests {
         assert!(stats.total_liquidity > 0.0);
         assert!(stats.avg_liquidity > 0.0);
     }
+
+    #[test]
+    fn test_pcoin_usdc_pool_creation() {
+        let pool = LiquidityPool::new(
+            "pcoin_usdc".to_string(),
+            "P-COIN".to_string(),
+            "USDC".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            50000.0,
+            0.10,
+        );
+        assert_eq!(pool.config.pool_id, "pcoin_usdc");
+        assert_eq!(pool.config.token_a, "P-COIN");
+        assert_eq!(pool.config.token_b, "USDC");
+    }
 }

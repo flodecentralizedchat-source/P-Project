@@ -11,6 +11,7 @@ pub enum TreasuryError {
     TokenOperationFailed(String),
     DatabaseError(String),
     SerializationError(String),
+    NGOAccountNotFound,
 }
 
 impl std::fmt::Display for TreasuryError {
@@ -23,6 +24,7 @@ impl std::fmt::Display for TreasuryError {
             }
             TreasuryError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
             TreasuryError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+            TreasuryError::NGOAccountNotFound => write!(f, "NGO treasury account not found"),
         }
     }
 }
@@ -57,6 +59,7 @@ pub struct Treasury {
     multisig_signers: Vec<String>, // List of authorized signers
     multisig_required: usize,      // Number of signatures required
     pending_transactions: HashMap<String, PendingTransaction>, // tx_id -> transaction
+    ngo_treasuries: HashMap<String, NGOTreasuryAccount>,
 }
 
 // Structure for pending multi-sig transactions
@@ -71,6 +74,25 @@ pub struct PendingTransaction {
     pub signatures: Vec<String>, // List of signers who approved
     pub created_at: NaiveDateTime,
     pub executed: bool,
+}
+
+/// Records for NGO treasury operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NGOTreasuryRecord {
+    pub timestamp: NaiveDateTime,
+    pub amount: f64,
+    pub record_type: String,
+    pub description: String,
+}
+
+/// On-chain representation of an NGO treasury bucket
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NGOTreasuryAccount {
+    pub ngo_address: String,
+    pub balance: f64,
+    pub purpose: String,
+    pub last_update: NaiveDateTime,
+    pub records: Vec<NGOTreasuryRecord>,
 }
 
 impl Treasury {
@@ -90,6 +112,7 @@ impl Treasury {
             ], // Default signers
             multisig_required: 3, // Default 3-of-5 multi-sig
             pending_transactions: HashMap::new(),
+            ngo_treasuries: HashMap::new(),
         }
     }
 
@@ -230,6 +253,106 @@ impl Treasury {
     /// Get treasury balance for an asset
     pub fn get_balance(&self, asset: &str) -> f64 {
         *self.reserves.get(asset).unwrap_or(&0.0)
+    }
+
+    /// Register an NGO treasury account for on-chain budgeting
+    pub fn register_ngo_treasury(
+        &mut self,
+        ngo_address: String,
+        purpose: String,
+    ) -> Result<(), TreasuryError> {
+        if self.ngo_treasuries.contains_key(&ngo_address) {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        let now = Utc::now().naive_utc();
+        self.ngo_treasuries.insert(
+            ngo_address.clone(),
+            NGOTreasuryAccount {
+                ngo_address,
+                balance: 0.0,
+                purpose,
+                last_update: now,
+                records: Vec::new(),
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Fund an existing NGO treasury from the USD reserves
+    pub fn fund_ngo_treasury(
+        &mut self,
+        ngo_address: &str,
+        amount: f64,
+    ) -> Result<(), TreasuryError> {
+        if amount <= 0.0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        let current_balance = self.get_balance("USD");
+        if amount > current_balance {
+            return Err(TreasuryError::InsufficientFunds);
+        }
+
+        let account = self
+            .ngo_treasuries
+            .get_mut(ngo_address)
+            .ok_or(TreasuryError::NGOAccountNotFound)?;
+
+        self.reserves
+            .insert("USD".to_string(), current_balance - amount);
+        account.balance += amount;
+        account.last_update = Utc::now().naive_utc();
+        account.records.push(NGOTreasuryRecord {
+            timestamp: Utc::now().naive_utc(),
+            amount,
+            record_type: "deposit".to_string(),
+            description: "Funded NGO treasury".to_string(),
+        });
+
+        Ok(())
+    }
+
+    /// Withdraw tokens from an NGO treasury allocation for spending
+    pub fn withdraw_from_ngo_treasury(
+        &mut self,
+        ngo_address: &str,
+        amount: f64,
+    ) -> Result<f64, TreasuryError> {
+        if amount <= 0.0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        let account = self
+            .ngo_treasuries
+            .get_mut(ngo_address)
+            .ok_or(TreasuryError::NGOAccountNotFound)?;
+
+        if amount > account.balance {
+            return Err(TreasuryError::InsufficientFunds);
+        }
+
+        account.balance -= amount;
+        account.last_update = Utc::now().naive_utc();
+        account.records.push(NGOTreasuryRecord {
+            timestamp: Utc::now().naive_utc(),
+            amount,
+            record_type: "withdraw".to_string(),
+            description: "NGO treasury withdrawal".to_string(),
+        });
+
+        Ok(amount)
+    }
+
+    /// Get a reference to an NGO treasury account
+    pub fn get_ngo_treasury(&self, ngo_address: &str) -> Option<&NGOTreasuryAccount> {
+        self.ngo_treasuries.get(ngo_address)
+    }
+
+    /// Retrieve all NGO treasuries managed by the DAO
+    pub fn get_all_ngo_treasuries(&self) -> &HashMap<String, NGOTreasuryAccount> {
+        &self.ngo_treasuries
     }
 
     /// Allocate funds for specific purposes

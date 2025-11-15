@@ -18,7 +18,11 @@ impl RateLimiter {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(120);
-        Self { inner: Mutex::new(HashMap::new()), window_secs, max }
+        Self {
+            inner: Mutex::new(HashMap::new()),
+            window_secs,
+            max,
+        }
     }
 
     pub fn from_env_with_prefix(prefix: &str) -> Self {
@@ -32,11 +36,19 @@ impl RateLimiter {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(20);
-        Self { inner: Mutex::new(HashMap::new()), window_secs, max }
+        Self {
+            inner: Mutex::new(HashMap::new()),
+            window_secs,
+            max,
+        }
     }
 
     pub fn from_pair(window_secs: u64, max: u64) -> Self {
-        Self { inner: Mutex::new(HashMap::new()), window_secs, max }
+        Self {
+            inner: Mutex::new(HashMap::new()),
+            window_secs,
+            max,
+        }
     }
 
     pub async fn allow(&self, key: &str) -> bool {

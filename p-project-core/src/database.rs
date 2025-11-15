@@ -2,7 +2,7 @@ pub mod mongodb;
 pub mod mysql;
 pub mod redis;
 
-pub use mysql::{MySqlDatabase, BalanceError};
+pub use mysql::{BalanceError, MySqlDatabase};
 
 use crate::models::Proposal;
 use async_trait::async_trait;

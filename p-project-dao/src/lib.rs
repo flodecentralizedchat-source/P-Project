@@ -1,10 +1,10 @@
 // P-Project DAO Governance Implementation
-use p_project_core::models::{Proposal, ProposalStatus};
-use p_project_core::database::Database;
+use chrono::prelude::*;
 use p_project_contracts::token::PProjectToken;
+use p_project_core::database::Database;
+use p_project_core::models::{Proposal, ProposalStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaoGovernance<D: Database> {
@@ -35,7 +35,7 @@ impl<D: Database> DaoGovernance<D> {
     ) -> Result<String, String> {
         let proposal_id = uuid::Uuid::new_v4().to_string();
         let voting_end_time = Utc::now().naive_utc() + chrono::Duration::days(7); // 7-day voting period
-        
+
         let proposal = Proposal {
             id: proposal_id.clone(),
             title,
@@ -48,13 +48,16 @@ impl<D: Database> DaoGovernance<D> {
             execution_data: None,
             executed_at: None,
         };
-        
+
         // Save to database first
-        self.database.save_proposal(&proposal).await.map_err(|e| e.to_string())?;
-        
+        self.database
+            .save_proposal(&proposal)
+            .await
+            .map_err(|e| e.to_string())?;
+
         self.proposals.insert(proposal_id.clone(), proposal);
         self.votes.insert(proposal_id.clone(), HashMap::new());
-        
+
         Ok(proposal_id)
     }
 
@@ -125,29 +128,31 @@ impl<D: Database> DaoGovernance<D> {
     pub fn tally_votes(&mut self, proposal_id: &str) -> Result<bool, String> {
         // Check if proposal exists and is active
         let is_active = {
-            let proposal = self.proposals.get(proposal_id)
+            let proposal = self
+                .proposals
+                .get(proposal_id)
                 .ok_or("Proposal not found")?;
             matches!(proposal.status, ProposalStatus::Active)
         };
-            
+
         if !is_active {
             return Err("Proposal is not active".to_string());
         }
 
         let (approve_votes, reject_votes) = self.get_vote_count(proposal_id)?;
         let total_votes = approve_votes + reject_votes;
-        
+
         // Require minimum participation (e.g., 10% of total supply)
         let total_supply = self.token_contract.get_total_supply() as u64;
         let min_participation = total_supply / 10;
-        
+
         if total_votes < min_participation {
             return Err("Not enough participation to tally votes".to_string());
         }
 
         // Simple majority wins
         let passed = approve_votes > reject_votes;
-        
+
         // Update the proposal status
         let proposal = self
             .proposals
@@ -177,10 +182,13 @@ impl<D: Database> DaoGovernance<D> {
         // For now, we'll just mark it as executed
         proposal.status = ProposalStatus::Executed;
         proposal.executed_at = Some(Utc::now().naive_utc());
-        
+
         // Save to database
-        self.database.update_proposal(proposal).await.map_err(|e| e.to_string())?;
-        
+        self.database
+            .update_proposal(proposal)
+            .await
+            .map_err(|e| e.to_string())?;
+
         Ok(())
     }
 
@@ -189,17 +197,18 @@ impl<D: Database> DaoGovernance<D> {
         // Check that both users exist and have token balances
         let from_balance = self.token_contract.get_balance(from_user_id);
         let to_balance = self.token_contract.get_balance(to_user_id);
-        
+
         if from_balance <= 0.0 || to_balance <= 0.0 {
             return Err("Both users must have token balances".to_string());
         }
-        
+
         // Prevent circular delegation
         if self.check_circular_delegation(to_user_id, from_user_id) {
             return Err("Circular delegation detected".to_string());
         }
-        
-        self.delegates.insert(from_user_id.to_string(), to_user_id.to_string());
+
+        self.delegates
+            .insert(from_user_id.to_string(), to_user_id.to_string());
         Ok(())
     }
 
@@ -273,7 +282,7 @@ impl<D: Database> DaoGovernance<D> {
         // Count weighted votes based on quadratic voting power
         for (user_id, &approve) in votes {
             let voting_power = self.calculate_quadratic_voting_power(user_id);
-            
+
             // If user has delegated their vote, don't count their balance
             if !self.delegates.contains_key(user_id) {
                 if approve {
@@ -299,7 +308,7 @@ impl<D: Database> DaoGovernance<D> {
     pub fn get_user_delegations(&self, user_id: &str) -> (Option<&String>, Vec<&String>) {
         // Who this user has delegated to
         let delegated_to = self.delegates.get(user_id);
-        
+
         // Who has delegated to this user
         let delegated_by: Vec<&String> = self
             .delegates
@@ -307,7 +316,7 @@ impl<D: Database> DaoGovernance<D> {
             .filter(|(_, delegate)| *delegate == user_id)
             .map(|(voter, _)| voter)
             .collect();
-        
+
         (delegated_to, delegated_by)
     }
 
@@ -315,17 +324,20 @@ impl<D: Database> DaoGovernance<D> {
     pub fn remove_all_delegations(&mut self, user_id: &str) {
         // Remove delegation this user has made
         self.delegates.remove(user_id);
-        
+
         // Remove delegations others have made to this user
         self.delegates.retain(|_, delegate| delegate != user_id);
     }
 
     /// Get all active proposals
-    pub async fn get_active_proposals(&self) -> Result<Vec<Proposal>, String> 
+    pub async fn get_active_proposals(&self) -> Result<Vec<Proposal>, String>
     where
         D: Database,
     {
-        self.database.get_active_proposals().await.map_err(|e: D::Error| e.to_string())
+        self.database
+            .get_active_proposals()
+            .await
+            .map_err(|e: D::Error| e.to_string())
     }
 
     /// Get a specific proposal by ID
@@ -333,6 +345,9 @@ impl<D: Database> DaoGovernance<D> {
     where
         D: Database,
     {
-        self.database.get_proposal(proposal_id).await.map_err(|e: D::Error| e.to_string())
+        self.database
+            .get_proposal(proposal_id)
+            .await
+            .map_err(|e: D::Error| e.to_string())
     }
 }

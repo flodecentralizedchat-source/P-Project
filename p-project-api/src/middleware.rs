@@ -1,19 +1,19 @@
 // Middleware and security utilities for the P-Project API
 
+use axum::http::Method;
 use axum::{
     body::Body,
     http::{header, HeaderValue, Request, StatusCode},
     middleware::Next,
     response::Response,
 };
+use http::HeaderName;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::time::Duration;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
-use axum::http::Method;
-use tower::limit::RateLimitLayer;
-use std::time::Duration;
 
 pub fn init_middleware() {
     println!("Middleware initialized");
@@ -29,17 +29,8 @@ pub fn build_cors_from_env() -> CorsLayer {
         .is_some();
 
     let mut layer = CorsLayer::new()
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PATCH,
-            Method::OPTIONS,
-        ])
-        .allow_headers([
-            header::AUTHORIZATION,
-            header::CONTENT_TYPE,
-            header::ACCEPT,
-        ]);
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT]);
 
     if let Ok(origins) = env::var("CORS_ALLOWED_ORIGINS") {
         if origins.trim() == "*" {
@@ -76,7 +67,7 @@ pub fn build_body_limit_from_env() -> RequestBodyLimitLayer {
 
 // Simple global rate limit (requests per second) using tower's RateLimitLayer
 // RATE_LIMIT_RPS: number per second (default 10)
-pub fn build_rate_limit_from_env() -> RateLimitLayer {
+pub fn build_rate_limit_from_env() -> tower_http::limit::rate::RateLimitLayer {
     let max = std::env::var("RATE_LIMIT_MAX")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -85,17 +76,17 @@ pub fn build_rate_limit_from_env() -> RateLimitLayer {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(60);
-    RateLimitLayer::new(max, Duration::from_secs(window))
+    tower_http::limit::rate::RateLimitLayer::new(max, Duration::from_secs(window))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    sub: String,
-    exp: usize,
+    pub sub: String,
+    pub exp: usize,
     #[allow(dead_code)]
-    iat: Option<usize>,
+    pub iat: Option<usize>,
     #[allow(dead_code)]
-    role: Option<String>,
+    pub role: Option<String>,
 }
 
 fn unauthorized_response() -> Response {
@@ -108,7 +99,7 @@ fn unauthorized_response() -> Response {
 }
 
 // Simple JWT verification middleware (HS256) using JWT_SECRET env var
-pub async fn require_jwt<B>(mut req: Request<B>, next: Next<B>) -> Response {
+pub async fn require_jwt(mut req: Request, next: Next) -> Response {
     let secret = match env::var("JWT_SECRET") {
         Ok(v) => v,
         Err(_) => return unauthorized_response(),
@@ -143,7 +134,7 @@ pub async fn require_jwt<B>(mut req: Request<B>, next: Next<B>) -> Response {
 }
 
 // Per-IP rate limit using AppState's limiter (skips OPTIONS)
-pub async fn require_rate_limit<B>(req: Request<B>, next: Next<B>) -> Response {
+pub async fn require_rate_limit(req: Request, next: Next) -> Response {
     use axum::http::Method;
     if req.method() == Method::OPTIONS {
         return next.run(req).await;
@@ -158,12 +149,22 @@ pub async fn require_rate_limit<B>(req: Request<B>, next: Next<B>) -> Response {
 
     let path = req.uri().path().to_string();
     let method = req.method().clone();
-    let is_strict = method == Method::POST && matches!(path.as_str(),
-        "/airdrop/create" | "/dao/proposals/execute" | "/web2/create-donation-widget" | "/web2/create-youtube-tip-config" | "/web2/register-messaging-bot"
-    );
+    let is_strict = method == Method::POST
+        && matches!(
+            path.as_str(),
+            "/airdrop/create"
+                | "/dao/proposals/execute"
+                | "/web2/create-donation-widget"
+                | "/web2/create-youtube-tip-config"
+                | "/web2/register-messaging-bot"
+        );
 
     if let Some(state) = req.extensions().get::<crate::shared::AppState>() {
-        let limiter = if is_strict { &state.strict_rate_limiter } else { &state.rate_limiter };
+        let limiter = if is_strict {
+            &state.strict_rate_limiter
+        } else {
+            &state.rate_limiter
+        };
         let key = format!("{}:{}", ip, if is_strict { path } else { "*".to_string() });
         if !limiter.allow(&key).await {
             let body = serde_json::json!({"error": "rate_limited"}).to_string();
@@ -179,7 +180,7 @@ pub async fn require_rate_limit<B>(req: Request<B>, next: Next<B>) -> Response {
 }
 
 // Admin-only guard using JWT role claim
-pub async fn require_admin<B>(req: Request<B>, next: Next<B>) -> Response {
+pub async fn require_admin(req: Request, next: Next) -> Response {
     if let Some(claims) = req.extensions().get::<Claims>() {
         if matches!(claims.role.as_deref(), Some("admin")) {
             return next.run(req).await;

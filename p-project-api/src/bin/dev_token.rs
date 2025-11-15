@@ -28,9 +28,17 @@ fn main() {
     let now = chrono::Utc::now().timestamp() as usize;
     let exp = (chrono::Utc::now() + chrono::Duration::hours(hours)).timestamp() as usize;
 
-    let claims = Claims { sub, exp, iat: now, role };
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
-        .expect("Failed to encode JWT");
+    let claims = Claims {
+        sub,
+        exp,
+        iat: now,
+        role,
+    };
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .expect("Failed to encode JWT");
     println!("{}", token);
 }
-

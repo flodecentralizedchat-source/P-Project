@@ -1,5 +1,8 @@
+use p_project_contracts::{
+    nft::{MarketplaceListing, NFTCollection, NFTMetadata, NFT},
+    NFTContract,
+};
 use p_project_core::{models::User, utils::shorten_wallet_address};
-use p_project_contracts::{nft::{NFTMetadata, NFT, NFTCollection, MarketplaceListing}, NFTContract};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -17,7 +20,7 @@ pub struct Proposal {
     title: String,
     description: String,
     creator_id: String,
-    created_at: String, // ISO string format
+    created_at: String,      // ISO string format
     voting_end_time: String, // ISO string format
     status: String,
 }
@@ -500,7 +503,7 @@ pub fn calculate_staking_yield(amount: f64, duration_days: i64) -> StakingYieldR
     let years = duration_days as f64 / 365.0;
     let projected_rewards = amount * apy_rate * years;
     let total_return = amount + projected_rewards;
-    
+
     StakingYieldResult::new(
         amount,
         duration_days,
@@ -583,8 +586,7 @@ pub fn buy_nft(listing_id: &str, buyer: &str) -> bool {
     // In a real implementation, this would call the backend API
     log(&format!(
         "User {} bought NFT from listing {}",
-        buyer,
-        listing_id
+        buyer, listing_id
     ));
     true // Success
 }
@@ -592,10 +594,7 @@ pub fn buy_nft(listing_id: &str, buyer: &str) -> bool {
 #[wasm_bindgen]
 pub fn get_user_nfts(user_id: &str) -> String {
     // In a real implementation, this would fetch from backend
-    log(&format!(
-        "Fetching NFTs for user {}",
-        user_id
-    ));
+    log(&format!("Fetching NFTs for user {}", user_id));
     "[]".to_string() // Return empty array for now
 }
 
@@ -652,12 +651,7 @@ pub fn remove_liquidity(pool_id: &str, user_id: &str) -> bool {
 }
 
 #[wasm_bindgen]
-pub fn swap_tokens(
-    pool_id: &str,
-    input_token: &str,
-    input_amount: f64,
-    user_id: &str,
-) -> f64 {
+pub fn swap_tokens(pool_id: &str, input_token: &str, input_amount: f64, user_id: &str) -> f64 {
     // In a real implementation, this would call the backend API
     log(&format!(
         "Swapping {} {} in pool {} for user {}",
@@ -669,10 +663,7 @@ pub fn swap_tokens(
 #[wasm_bindgen]
 pub fn get_pool_stats(pool_id: &str) -> String {
     // In a real implementation, this would fetch from backend
-    log(&format!(
-        "Fetching stats for pool {}",
-        pool_id
-    ));
+    log(&format!("Fetching stats for pool {}", pool_id));
     // Return mock JSON data
     r#"{"total_liquidity": 1000000.0, "total_volume": 5000000.0, "total_fees": 15000.0, "total_providers": 150, "avg_liquidity": 6666.67, "apr_rate": 0.12}"#.to_string()
 }
@@ -715,8 +706,8 @@ pub fn calculate_projected_yield(liquidity_amount: f64, days: f64, apr_rate: f64
     let rate = apr_rate;
     let n = 365.0; // Daily compounding
     let t = days / 365.0; // Time in years
-    
+
     let yield_amount = principal * ((1.0 + rate / n).powf(n * t) - 1.0);
-    
+
     yield_amount
 }

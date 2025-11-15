@@ -36,25 +36,33 @@ impl BridgeStore for DatabaseWrapper {
         amount: f64,
         status: &str,
     ) -> Result<(), BoxedBridgeError> {
-        self.db.as_ref().insert_bridge_tx(id, user_id, token, from_chain, to_chain, amount, status)
+        self.db
+            .as_ref()
+            .insert_bridge_tx(id, user_id, token, from_chain, to_chain, amount, status)
             .await
             .map_err(|e| Box::new(e) as BoxedBridgeError)
     }
 
     async fn set_bridge_src_tx(&self, id: &str, src_tx_hash: &str) -> Result<(), BoxedBridgeError> {
-        self.db.as_ref().update_bridge_src_tx(id, src_tx_hash)
+        self.db
+            .as_ref()
+            .update_bridge_src_tx(id, src_tx_hash)
             .await
             .map_err(|e| Box::new(e) as BoxedBridgeError)
     }
 
     async fn set_bridge_dst_tx(&self, id: &str, dst_tx_hash: &str) -> Result<(), BoxedBridgeError> {
-        self.db.as_ref().update_bridge_dst_tx(id, dst_tx_hash)
+        self.db
+            .as_ref()
+            .update_bridge_dst_tx(id, dst_tx_hash)
             .await
             .map_err(|e| Box::new(e) as BoxedBridgeError)
     }
 
     async fn set_bridge_lock_id(&self, id: &str, lock_id: &str) -> Result<(), BoxedBridgeError> {
-        self.db.as_ref().update_bridge_lock_id(id, lock_id)
+        self.db
+            .as_ref()
+            .update_bridge_lock_id(id, lock_id)
             .await
             .map_err(|e| Box::new(e) as BoxedBridgeError)
     }
@@ -65,13 +73,20 @@ impl BridgeStore for DatabaseWrapper {
         status: &str,
         error_msg: Option<&str>,
     ) -> Result<(), BoxedBridgeError> {
-        self.db.as_ref().update_bridge_status_row(id, status, error_msg)
+        self.db
+            .as_ref()
+            .update_bridge_status_row(id, status, error_msg)
             .await
             .map_err(|e| Box::new(e) as BoxedBridgeError)
     }
 
-    async fn get_bridge_tx(&self, id: &str) -> Result<p_project_core::models::BridgeTx, BoxedBridgeError> {
-        self.db.as_ref().fetch_bridge_tx(id)
+    async fn get_bridge_tx(
+        &self,
+        id: &str,
+    ) -> Result<p_project_core::models::BridgeTx, BoxedBridgeError> {
+        self.db
+            .as_ref()
+            .fetch_bridge_tx(id)
             .await
             .map_err(|e| Box::new(e) as BoxedBridgeError)
     }
@@ -80,7 +95,9 @@ impl BridgeStore for DatabaseWrapper {
         &self,
         from_chain: &str,
     ) -> Result<Vec<p_project_core::models::BridgeTx>, BoxedBridgeError> {
-        self.db.as_ref().list_locked_without_dst(from_chain)
+        self.db
+            .as_ref()
+            .list_locked_without_dst(from_chain)
             .await
             .map_err(|e| Box::new(e) as BoxedBridgeError)
     }

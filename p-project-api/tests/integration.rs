@@ -3,53 +3,43 @@ use p_project_core::database::MySqlDatabase;
 #[cfg(feature = "database-tests")]
 use p_project_core::models::{StakingInfo, TransactionType};
 #[cfg(feature = "database-tests")]
+use rust_decimal::Decimal;
+#[cfg(feature = "database-tests")]
 use sqlx::MySqlPool;
 #[cfg(feature = "database-tests")]
 use sqlx::Row;
-#[cfg(feature = "database-tests")]
-use rust_decimal::Decimal;
 
 #[cfg(feature = "database-tests")]
 async fn init_test_db() -> Option<(MySqlDatabase, MySqlPool)> {
     let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
         "mysql://pproject:pprojectpassword@localhost/p_project_test".to_string()
     });
-    
+
     // Try to connect to the database, return None if we can't
     let db = match MySqlDatabase::new(&db_url).await {
         Ok(db) => db,
         Err(_) => return None,
     };
-    
+
     // Try to initialize tables, return None if we can't
     if db.init_tables().await.is_err() {
         return None;
     }
-    
+
     let pool = match MySqlPool::connect(&db_url).await {
         Ok(pool) => pool,
         Err(_) => return None,
     };
 
     // Try to clean up test data, but don't fail if we can't
-    let _ = sqlx::query("DELETE FROM transactions")
-        .execute(&pool)
-        .await;
-    let _ = sqlx::query("DELETE FROM stakes")
-        .execute(&pool)
-        .await;
-    let _ = sqlx::query("DELETE FROM balances")
-        .execute(&pool)
-        .await;
-    let _ = sqlx::query("DELETE FROM users")
-        .execute(&pool)
-        .await;
+    let _ = sqlx::query("DELETE FROM transactions").execute(&pool).await;
+    let _ = sqlx::query("DELETE FROM stakes").execute(&pool).await;
+    let _ = sqlx::query("DELETE FROM balances").execute(&pool).await;
+    let _ = sqlx::query("DELETE FROM users").execute(&pool).await;
     let _ = sqlx::query("DELETE FROM airdrop_recipients")
         .execute(&pool)
         .await;
-    let _ = sqlx::query("DELETE FROM airdrops")
-        .execute(&pool)
-        .await;
+    let _ = sqlx::query("DELETE FROM airdrops").execute(&pool).await;
 
     Some((db, pool))
 }
@@ -113,22 +103,18 @@ async fn transfer_updates_balances() {
     .await
     .expect("transfer succeeds");
 
-    let available_a_row = sqlx::query(
-        "SELECT available_balance FROM balances WHERE user_id = ?",
-    )
-    .bind(&user_a.id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let available_a_row = sqlx::query("SELECT available_balance FROM balances WHERE user_id = ?")
+        .bind(&user_a.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let available_a: f64 = available_a_row.get(0);
-    
-    let available_b_row = sqlx::query(
-        "SELECT available_balance FROM balances WHERE user_id = ?",
-    )
-    .bind(&user_b.id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+
+    let available_b_row = sqlx::query("SELECT available_balance FROM balances WHERE user_id = ?")
+        .bind(&user_b.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let available_b: f64 = available_b_row.get(0);
 
     assert_eq!(available_a, 75.0);
@@ -170,13 +156,12 @@ async fn stake_and_unstake_flow() {
         }
     ));
 
-    let balance_row = sqlx::query(
-        "SELECT available_balance, staked_balance FROM balances WHERE user_id = ?",
-    )
-    .bind(&user.id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let balance_row =
+        sqlx::query("SELECT available_balance, staked_balance FROM balances WHERE user_id = ?")
+            .bind(&user.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let available_balance: f64 = balance_row.get(0);
     let staked_balance: f64 = balance_row.get(1);
     assert_eq!(available_balance, 150.0);
@@ -188,13 +173,12 @@ async fn stake_and_unstake_flow() {
         .expect("unstake");
 
     assert!(unstake.end_time.is_some());
-    let balances_row = sqlx::query(
-        "SELECT available_balance, staked_balance FROM balances WHERE user_id = ?",
-    )
-    .bind(&user.id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let balances_row =
+        sqlx::query("SELECT available_balance, staked_balance FROM balances WHERE user_id = ?")
+            .bind(&user.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let available_balance: f64 = balances_row.get(0);
     let staked_balance: f64 = balances_row.get(1);
     assert_eq!(available_balance, 200.0);
@@ -211,7 +195,7 @@ async fn airdrop_claims_work() {
             return;
         }
     };
-    
+
     let user = db
         .create_user(
             "claimer",
@@ -224,9 +208,13 @@ async fn airdrop_claims_work() {
     db.create_airdrop("airdrop1", Decimal::from_f64(500.0).unwrap(), None, None)
         .await
         .unwrap();
-    db.add_airdrop_recipients("airdrop1", &[(user.id.clone(), Decimal::from_f64(100.0).unwrap())], Some("test"))
-        .await
-        .unwrap();
+    db.add_airdrop_recipients(
+        "airdrop1",
+        &[(user.id.clone(), Decimal::from_f64(100.0).unwrap())],
+        Some("test"),
+    )
+    .await
+    .unwrap();
 
     let amount = db.claim_airdrop("airdrop1", &user.id).await.unwrap();
     assert_eq!(amount, Decimal::from_f64(100.0).unwrap());

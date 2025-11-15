@@ -263,7 +263,14 @@ Notes
 - `POST /bridge` – Bridge tokens between chains (initiates a cross-chain token transfer).
 - `POST /bridge/status` – Get bridge transaction status (returns detailed status of a bridge transaction).
 - `GET /metrics` – Get performance metrics (returns server performance and health metrics).
-- `GET /static/*` – Serves files from `pkg/` (works in Docker build; local requires prebuilt `pkg/`).
+- `GET /static/*` – Serves files from `pkg/` (works in Docker build; local requires prebuilt `pkg/`.
+- E-Commerce Payment Endpoints:
+  - `POST /web2/create-ecommerce-integration` – Create a new Shopify/WooCommerce integration (admin only).
+  - `POST /web2/process-ecommerce-payment` – Process an e-commerce payment from Shopify/WooCommerce stores.
+  - `POST /web2/verify-webhook` – Verify webhook signatures from Shopify/WooCommerce.
+  - `POST /merchant/digital-goods` – Add a digital goods product to a merchant (admin only).
+  - `POST /merchant/digital-goods/purchase` – Purchase a digital good.
+  - `POST /merchant/digital-goods/transaction` – Get digital goods transaction details.
 
 Request examples
 - Create user
@@ -345,6 +352,64 @@ Responses
     "active_connections": 10
   }
   ```
+- E-Commerce Payment Responses:
+  - Create e-commerce integration:
+    ```json
+    {
+      "integration_id": "ecom_1234567890",
+      "success": true,
+      "message": "E-commerce integration created successfully"
+    }
+    ```
+  - Process e-commerce payment:
+    ```json
+    {
+      "payment_response": {
+        "transaction_id": "tx_1234567890",
+        "order_id": "order_123",
+        "status": "success",
+        "timestamp": "2023-01-01T12:34:56",
+        "tx_hash": "0x1234567890abcdef",
+        "message": "Payment processed successfully"
+      }
+    }
+    ```
+  - Verify webhook signature:
+    ```json
+    {
+      "valid": true
+    }
+    ```
+  - Add digital goods product:
+    ```json
+    {
+      "success": true,
+      "message": "Digital goods product added successfully"
+    }
+    ```
+  - Purchase digital goods:
+    ```json
+    {
+      "transaction": {
+        "transaction_id": "dgtx_1234567890",
+        "product_id": "product_123",
+        "customer_id": "customer_123",
+        "customer_country": "US",
+        "customer_language": "en",
+        "amount": 9.99,
+        "currency": "P",
+        "status": "completed",
+        "delivery_status": "delivered",
+        "delivery_method": "download",
+        "delivery_data": {
+          "download_url": "https://example.com/download/test-ebook.pdf",
+          "filename": "Test E-book"
+        },
+        "created_at": "2023-01-01T12:34:56",
+        "completed_at": "2023-01-01T12:34:56"
+      }
+    }
+    ```
 
 ---
 
@@ -461,23 +526,50 @@ This guide targets development usage. For production hardening, you'll want to l
 - POST `/bridge/status`
   - 404 `{ "error": "transaction_not_found" }` when the transaction ID doesn't exist.
   - 500 `{ "error": "internal_error" }` for database failures.
+
+- POST `/web2/create-ecommerce-integration`
+  - 400 `{ "error": "invalid_config" }` when the e-commerce configuration is invalid.
+  - 401 `{ "error": "unauthorized" }` when JWT is missing or invalid.
+  - 403 `{ "error": "forbidden" }` when user is not an admin.
+  - 500 `{ "error": "internal_error" }` for other failures.
+
+- POST `/web2/process-ecommerce-payment`
+  - 400 `{ "error": "invalid_payment" }` when the payment data is invalid.
+  - 401 `{ "error": "unauthorized" }` when JWT is missing or invalid.
+  - 500 `{ "error": "internal_error" }` for other failures.
+
+- POST `/merchant/digital-goods`
+  - 400 `{ "error": "invalid_product" }` when the product data is invalid.
+  - 401 `{ "error": "unauthorized" }` when JWT is missing or invalid.
+  - 403 `{ "error": "forbidden" }` when user is not an admin.
+  - 500 `{ "error": "internal_error" }` for other failures.
+
+- POST `/merchant/digital-goods/purchase`
+  - 400 `{ "error": "invalid_purchase" }` when the purchase data is invalid or product is not available.
+  - 401 `{ "error": "unauthorized" }` when JWT is missing or invalid.
+  - 500 `{ "error": "internal_error" }` for other failures.
+
 ## Security & Roles
 
 - Authentication: all mutating/sensitive endpoints require JWT (HS256). See `p-docs/auth.md` for setup and examples.
 - Roles:
   - user: default role, may perform transfers, staking, claims, bridge submits, and Web2 donation/tip interactions.
   - governance: can manage DAO tally and proposal execution (where allowed).
-  - admin: full administrative controls (airdrop creation, governance execute, Web2 configuration, bot registration).
+  - admin: full administrative controls (airdrop creation, governance execute, Web2 configuration, bot registration, e-commerce integration).
 - Admin-only routes:
   - POST `/airdrop/create`
   - POST `/web2/create-donation-widget`
   - POST `/web2/create-youtube-tip-config`
   - POST `/web2/register-messaging-bot`
+  - POST `/web2/create-ecommerce-integration`
+  - POST `/merchant/digital-goods`
 - Governance-level:
   - POST `/dao/proposals/execute` (governance or admin)
   - POST `/dao/proposals/tally` (governance or admin)
 - Public (no auth):
   - GET `/`, `/metrics`, `/staking/tiers`, `/airdrop/status`, `/airdrop/recipients`
+  - POST `/web2/verify-webhook`
+  - POST `/merchant/digital-goods/transaction`
 
 ### Rate limiting
 

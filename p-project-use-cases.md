@@ -27,7 +27,7 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 * Aid distribution in war or disaster zones
 * Peace-relief credits for refugees
 
-### ✔ 1.3 Peace-Building Sponsorship
+### ✔ 1.3 Peace-Building Sponsorship[implemented]
 
 * Sponsor students in conflict zones
 * Sponsor peace-builders, activists, mediators
@@ -53,18 +53,18 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 * Clinics
 * Repair shops
 
-### ✔ 2.2 E-Commerce Payments
+### ✔ 2.2 E-Commerce Payments[implemented]
 
 * Accept P-Coin in Shopify/WooCommerce stores
 * Global checkout via QR payment
 * Cross-border digital goods
 
-### ✔ 2.3 Merchant Cashback Systems
+### ✔ 2.3 Merchant Cashback Systems[implemented]
 
 * Cashback in P-Coin for purchases
 * Loyalty points backed by real crypto
 
-### ✔ 2.4 Micro-Payments
+### ✔ 2.4 Micro-Payments[implemented]
 
 * Pay-per-article
 * Pay-per-view
@@ -75,25 +75,25 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 # 3. **Finance & Economic Use Cases**
 
-### ✔ 3.1 Cross-Border Remittance
+### ✔ 3.1 Cross-Border Remittance[implemented]
 
 * Near-zero-fee remittances
 * Instant diaspora payments for families
 * Remittance API for fintechs
 
-### ✔ 3.2 Savings & Treasury Tools
+### ✔ 3.2 Savings & Treasury Tools[implemented]
 
 * P-Coin interest vaults
 * Charity yield (portion goes to NGOs)
 * NGO treasury management on-chain
 
-### ✔ 3.3 Credit & Micro-Loans
+### ✔ 3.3 Credit & Micro-Loans[implemented]
 
 * P-Coin-collateral micro-loans
 * Credit scoring based on social impact
 * NGO-backed microfinance
 
-### ✔ 3.4 Payroll & Salaries
+### ✔ 3.4 Payroll & Salaries[implemented]
 
 * Crypto payroll for peace organizations
 * School payments for tuition/books
@@ -101,7 +101,7 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 ---
 
-# 4. **Web3 / DeFi Use Cases**
+# 4. **Web3 / DeFi Use Cases**[implemented]
 
 ### ✔ 4.1 Staking
 
@@ -109,20 +109,20 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 * Stake to earn governance voting power
 * Peace staking—rewards tied to donation events
 
-### ✔ 4.2 DAO Governance
+### ✔ 4.2 DAO Governance[implemented]
 
 * Vote on charity allocations
 * Vote on treasury decisions
 * Vote on partnerships / ecosystem expansion
 * Propose new NGOs
 
-### ✔ 4.3 Liquidity Pools & Farming
+### ✔ 4.3 Liquidity Pools & Farming[implemented]
 
 * P-Coin/USDC liquidity pool
 * Liquidity mining incentives
 * Stable LP for NGO payouts
 
-### ✔ 4.4 Tokenized Impact Assets
+### ✔ 4.4 Tokenized Impact Assets[implemented]
 
 * Tokenized carbon credits
 * Tokenized charity receipts
@@ -132,19 +132,19 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 # 5. **Education & Community Use Cases**
 
-### ✔ 5.1 Learn-to-Earn
+### ✔ 5.1 Learn-to-Earn[implemented]
 
 * Earn P-Coin for completing peace courses
 * Earn for finishing educational quizzes
 * Earn for joining workshops
 
-### ✔ 5.2 School & University Programs
+### ✔ 5.2 School & University Programs[implemented]
 
 * Peace clubs receive treasury grants
 * Student reward system
 * Blockchain education integration
 
-### ✔ 5.3 Content Creation Rewards
+### ✔ 5.3 Content Creation Rewards[implemented]
 
 * Bloggers earn P-Coin for peace articles
 * YouTubers earn for peace content
@@ -154,19 +154,19 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 # 6. **Gaming & Entertainment Use Cases**
 
-### ✔ 6.1 In-Game Currency
+### ✔ 6.1 In-Game Currency[implemented]
 
 * Games with peaceful missions
 * Non-violent reward mechanics
 * Positive behavior reward tokens
 
-### ✔ 6.2 Play-to-Earn (P2E)
+### ✔ 6.2 Play-to-Earn (P2E)[implemented]
 
 * Cooperate and earn P-Coin
 * Solve peace puzzles
 * Complete missions about community building
 
-### ✔ 6.3 NFT Collectibles
+### ✔ 6.3 NFT Collectibles[implemented]
 
 * Peace hero avatars
 * Peace Art collections supporting NGOs
@@ -176,19 +176,19 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 # 7. **Metaverse & Digital Identity**
 
-### ✔ 7.1 Peace Metaverse
+### ✔ 7.1 Peace Metaverse[implemented]
 
 * “Peace Island” virtual world
 * Build homes, schools, gardens
 * Buy land with P-Coin
 
-### ✔ 7.2 Identity & Reputation
+### ✔ 7.2 Identity & Reputation[implemented]
 
 * Peace Passport soulbound NFT
 * Humanitarian contribution profile
 * Volunteer hours verified on-chain
 
-### ✔ 7.3 Digital Governance
+### ✔ 7.3 Digital Governance[implemented]
 
 * Virtual town hall
 * On-chain community voting
@@ -198,26 +198,26 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 # 8. **Enterprise, Government & NGO Use Cases**
 
-### ✔ 8.1 NGO Accounting Automation
+### ✔ 8.1 NGO Accounting Automation[implemented]
 
 * Automated donation distribution
 * Auditable spending trails
 * Transparent public dashboards
 
-### ✔ 8.2 Corporate Social Responsibility (CSR)
+### ✔ 8.2 Corporate Social Responsibility (CSR)[implemented]
 
 * CSR contribution tracking
 * Employee “good deeds wallet”
 * Donation matching via P-Coin
 
-### ✔ 8.3 Government Use Cases
+### ✔ 8.3 Government Use Cases[implemented]
 
 * Peace incentive programs
 * Youth grants
 * Blockchain-based welfare disbursement
 * Anti-corruption transparent tracking
 
-### ✔ 8.4 Supply Chain Use Cases
+### ✔ 8.4 Supply Chain Use Cases[implemented]
 
 * Track donations (medicine, food, supplies)
 * Verify logistics of aid shipments
@@ -227,19 +227,19 @@ You can plug these directly into your whitepaper, roadmap, DApp features, and ec
 
 # ✅ **Additional Advanced Use Cases**
 
-### ✔ 9.1 AI + P-Coin Use Cases
+### ✔ 9.1 AI + P-Coin Use Cases[implemented]
 
 * AI chatbots for impact verification
 * AI-generated Peace NFT art
 * AI-driven fraud detection for NGOs
 
-### ✔ 9.2 IoT + P-Coin
+### ✔ 9.2 IoT + P-Coin[implemented]
 
 * Smart donation boxes (hardware wallets)
 * NFC wristbands for refugee camps
 * QR-code-based food distribution
 
-### ✔ 9.3 Web2 Integration
+### ✔ 9.3 Web2 Integration[implemented]
 
 * Facebook / Instagram donation widget
 * YouTube “Tip in PeaceCoin”

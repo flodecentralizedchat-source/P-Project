@@ -1,10 +1,10 @@
-use crate::models::{Proposal, ProposalStatus, ProposalExecutionType};
+use super::Database as DbTrait;
+use crate::models::{Proposal, ProposalExecutionType, ProposalStatus};
+use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use futures_util::TryStreamExt;
 use mongodb::{bson::DateTime, Client};
 use serde::{Deserialize, Serialize};
-use chrono::NaiveDateTime;
-use async_trait::async_trait;
-use super::Database as DbTrait;
 
 pub struct MongoDatabase {
     database: mongodb::Database,
@@ -26,7 +26,9 @@ impl DbTrait for MongoDatabase {
             status: proposal.status.clone(),
             execution_type: proposal.execution_type.clone(),
             execution_data: proposal.execution_data.clone(),
-            executed_at: proposal.executed_at.map(|dt| DateTime::from_millis(dt.and_utc().timestamp_millis())),
+            executed_at: proposal
+                .executed_at
+                .map(|dt| DateTime::from_millis(dt.and_utc().timestamp_millis())),
         };
         collection.insert_one(doc, None).await?;
         Ok(())
@@ -62,7 +64,7 @@ impl DbTrait for MongoDatabase {
         let collection = self.database.collection::<ProposalDocument>("proposals");
         let filter = mongodb::bson::doc! { "id": proposal_id };
         let doc = collection.find_one(filter, None).await?;
-        
+
         match doc {
             Some(doc) => Ok(Some(Proposal {
                 id: doc.id,

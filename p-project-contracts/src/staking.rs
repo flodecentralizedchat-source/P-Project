@@ -1,5 +1,7 @@
 use chrono::{Duration, NaiveDateTime, Utc};
 use p_project_core::models::StakingInfo;
+use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -56,13 +58,34 @@ pub struct StakingRewardsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StakingContract {
     staking_infos: HashMap<String, StakingInfo>, // user_id -> staking info
-    total_staked: f64,
+    total_staked: Decimal,
     staking_tiers: Vec<StakingTier>, // Different staking tiers with APY rates
     emergency_withdrawals_enabled: bool, // Emergency withdrawal feature flag
     rewards_config: StakingRewardsConfig, // Staking rewards configuration
     // New fields for team staking incentives
     team_member_boost: f64, // Additional APY boost for team members
     team_member_list: HashMap<String, bool>, // user_id -> is_team_member
+    // New fields for peace staking - rewards tied to donation events
+    donation_events: HashMap<String, Vec<DonationEvent>>, // user_id -> donation events
+    peace_staking_bonuses: HashMap<String, PeaceStakingBonus>, // user_id -> peace staking bonus info
+}
+
+// New struct for donation events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DonationEvent {
+    pub event_id: String,
+    pub user_id: String,
+    pub donation_amount: f64,
+    pub timestamp: NaiveDateTime,
+    pub staking_bonus_multiplier: f64, // Multiplier for peace staking rewards
+}
+
+// New struct for peace staking bonuses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeaceStakingBonus {
+    pub user_id: String,
+    pub total_bonus_earned: Decimal,
+    pub last_calculated: NaiveDateTime,
 }
 
 impl StakingContract {
@@ -109,12 +132,14 @@ impl StakingContract {
 
         Self {
             staking_infos: HashMap::new(),
-            total_staked: 0.0,
+            total_staked: Decimal::ZERO,
             staking_tiers: tiers,
             emergency_withdrawals_enabled: false,
             rewards_config,
             team_member_boost: 0.05, // 5% additional APY for team members
             team_member_list: HashMap::new(), // Initialize team member list
+            donation_events: HashMap::new(), // Initialize donation events
+            peace_staking_bonuses: HashMap::new(), // Initialize peace staking bonuses
         }
     }
 
@@ -179,6 +204,9 @@ impl StakingContract {
             return Err(StakingError::InvalidAmount);
         }
 
+        // Convert f64 to Decimal
+        let amount_decimal = Decimal::from_f64(amount).ok_or(StakingError::InvalidAmount)?;
+
         // Determine staking tier based on amount and duration
         let tier_name = {
             let tier = self
@@ -192,16 +220,16 @@ impl StakingContract {
 
         let staking_info = StakingInfo {
             user_id: user_id.clone(),
-            amount,
+            amount: amount_decimal,
             start_time,
             end_time: Some(end_time),
-            rewards_earned: 0.0,
+            rewards_earned: Decimal::ZERO,
             tier_name: Some(tier_name.clone()),
             is_compounding: false,
         };
 
         self.staking_infos.insert(user_id.clone(), staking_info);
-        self.total_staked += amount;
+        self.total_staked += amount_decimal;
 
         Ok(tier_name)
     }
@@ -260,7 +288,9 @@ impl StakingContract {
         // Update distributed rewards tracking
         self.rewards_config.distributed_rewards += final_rewards;
 
-        Ok((staking_info.amount, final_rewards))
+        // Convert Decimal values back to f64 for return
+        let amount_f64 = staking_info.amount.to_f64().unwrap_or(0.0);
+        Ok((amount_f64, final_rewards))
     }
 
     /// Emergency withdrawal (with higher penalties)
@@ -276,7 +306,7 @@ impl StakingContract {
             .ok_or(StakingError::NoStakingInfo)?;
 
         // Higher penalty for emergency withdrawal (50% of staked amount + all rewards)
-        let penalty = staking_info.amount * 0.5;
+        let penalty_decimal = staking_info.amount * Decimal::from_f64(0.5).unwrap_or(Decimal::ZERO);
         let rewards = self.calculate_rewards(&staking_info);
 
         self.total_staked -= staking_info.amount;
@@ -284,7 +314,10 @@ impl StakingContract {
         // Update distributed rewards tracking
         self.rewards_config.distributed_rewards += rewards;
 
-        Ok((staking_info.amount - penalty, rewards))
+        // Convert Decimal values back to f64 for return
+        let amount_f64 = staking_info.amount.to_f64().unwrap_or(0.0);
+        let penalty_f64 = penalty_decimal.to_f64().unwrap_or(0.0);
+        Ok((amount_f64 - penalty_f64, rewards))
     }
 
     /// Transfer staking position to another user
@@ -330,7 +363,8 @@ impl StakingContract {
         // Compound interest calculation: A = P(1 + r/n)^(nt)
         // For simplicity, we'll use continuous compounding: A = Pe^(rt)
         let years = days / 365.0;
-        let rewards = staking_info.amount * (f64::exp(apy_rate * years) - 1.0);
+        let amount_f64 = staking_info.amount.to_f64().unwrap_or(0.0);
+        let rewards = amount_f64 * (f64::exp(apy_rate * years) - 1.0);
 
         rewards
     }
@@ -366,7 +400,7 @@ impl StakingContract {
 
     /// Get total staked amount
     pub fn get_total_staked(&self) -> f64 {
-        self.total_staked
+        self.total_staked.to_f64().unwrap_or(0.0)
     }
 
     /// Compound rewards for a user (manually trigger compounding)
@@ -380,13 +414,14 @@ impl StakingContract {
             self.calculate_rewards(staking_info)
         };
 
+        let rewards_decimal = Decimal::from_f64(rewards).ok_or(StakingError::InvalidAmount)?;
         let staking_info = self
             .staking_infos
             .get_mut(user_id)
             .expect("Staking info must exist");
 
-        staking_info.rewards_earned += rewards;
-        staking_info.amount += rewards;
+        staking_info.rewards_earned += rewards_decimal;
+        staking_info.amount += rewards_decimal;
         staking_info.is_compounding = true;
 
         // Reset start time to now for new compounding period
@@ -441,6 +476,129 @@ impl StakingContract {
     /// Get team member APY boost
     pub fn get_team_member_boost(&self) -> f64 {
         self.team_member_boost
+    }
+
+    /// Record a donation event for peace staking rewards
+    pub fn record_donation_event(
+        &mut self,
+        event_id: String,
+        user_id: String,
+        donation_amount: f64,
+    ) -> Result<(), StakingError> {
+        if donation_amount <= 0.0 {
+            return Err(StakingError::InvalidAmount);
+        }
+
+        let timestamp = Utc::now().naive_utc();
+
+        // Calculate bonus multiplier based on donation amount
+        // Larger donations get higher multipliers
+        let staking_bonus_multiplier = if donation_amount >= 1000.0 {
+            2.0 // 2x bonus for large donations
+        } else if donation_amount >= 100.0 {
+            1.5 // 1.5x bonus for medium donations
+        } else {
+            1.2 // 1.2x bonus for small donations
+        };
+
+        let donation_event = DonationEvent {
+            event_id,
+            user_id: user_id.clone(),
+            donation_amount,
+            timestamp,
+            staking_bonus_multiplier,
+        };
+
+        // Add the donation event to the user's list
+        self.donation_events
+            .entry(user_id.clone())
+            .or_insert_with(Vec::new)
+            .push(donation_event);
+
+        // Initialize or update peace staking bonus for the user
+        if !self.peace_staking_bonuses.contains_key(&user_id) {
+            self.peace_staking_bonuses.insert(
+                user_id.clone(),
+                PeaceStakingBonus {
+                    user_id: user_id.clone(),
+                    total_bonus_earned: Decimal::ZERO,
+                    last_calculated: timestamp,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Calculate peace staking bonus for a user based on their donation events
+    pub fn calculate_peace_staking_bonus(&mut self, user_id: &str) -> Result<f64, StakingError> {
+        if !self.donation_events.contains_key(user_id) {
+            return Ok(0.0); // No donation events, no bonus
+        }
+
+        let donation_events = self.donation_events.get(user_id).unwrap();
+        let mut total_bonus = 0.0;
+        let now = Utc::now().naive_utc();
+
+        // Calculate bonus based on donation events
+        for event in donation_events {
+            // Calculate time since donation (in days)
+            let duration = now - event.timestamp;
+            let days_since_donation = duration.num_days() as f64;
+
+            // Bonus decreases over time (linear decay over 30 days)
+            let time_decay_factor = if days_since_donation > 30.0 {
+                0.0 // No bonus after 30 days
+            } else {
+                1.0 - (days_since_donation / 30.0) // Linear decay
+            };
+
+            // Calculate bonus: donation amount * multiplier * time decay
+            let event_bonus =
+                event.donation_amount * event.staking_bonus_multiplier * time_decay_factor * 0.01; // 1% base rate
+            total_bonus += event_bonus;
+        }
+
+        let total_bonus_decimal =
+            Decimal::from_f64(total_bonus).ok_or(StakingError::InvalidAmount)?;
+
+        // Update the user's total bonus earned
+        if let Some(bonus_info) = self.peace_staking_bonuses.get_mut(user_id) {
+            bonus_info.total_bonus_earned += total_bonus_decimal;
+            bonus_info.last_calculated = now;
+        } else {
+            // Create new bonus info if it doesn't exist
+            self.peace_staking_bonuses.insert(
+                user_id.to_string(),
+                PeaceStakingBonus {
+                    user_id: user_id.to_string(),
+                    total_bonus_earned: total_bonus_decimal,
+                    last_calculated: now,
+                },
+            );
+        }
+
+        Ok(total_bonus)
+    }
+
+    /// Get donation events for a user
+    pub fn get_donation_events_for_staker(&self, user_id: &str) -> Option<&Vec<DonationEvent>> {
+        self.donation_events.get(user_id)
+    }
+
+    /// Get peace staking bonus info for a user
+    pub fn get_peace_staking_bonus(&self, user_id: &str) -> Option<&PeaceStakingBonus> {
+        self.peace_staking_bonuses.get(user_id)
+    }
+
+    /// Get all donation events
+    pub fn get_all_donation_events(&self) -> &HashMap<String, Vec<DonationEvent>> {
+        &self.donation_events
+    }
+
+    /// Get all peace staking bonuses
+    pub fn get_all_peace_staking_bonuses(&self) -> &HashMap<String, PeaceStakingBonus> {
+        &self.peace_staking_bonuses
     }
 
     /// Calculate projected rewards for a staking position

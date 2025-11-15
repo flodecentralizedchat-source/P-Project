@@ -1,13 +1,13 @@
 //! IoT service module for P-Project
-//! 
+//!
 //! This module provides IoT integration features including:
 //! - Smart donation boxes (hardware wallets)
 //! - NFC wristbands for refugee camps
 //! - QR-code-based food distribution system
 
+use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{NaiveDateTime, Utc};
 
 /// IoT service configuration
 #[derive(Debug, Clone)]
@@ -110,7 +110,12 @@ impl IoTService {
     }
 
     /// Register a new smart donation box
-    pub fn register_donation_box(&mut self, box_id: String, location: String, wallet_address: String) -> Result<SmartDonationBox, Box<dyn std::error::Error>> {
+    pub fn register_donation_box(
+        &mut self,
+        box_id: String,
+        location: String,
+        wallet_address: String,
+    ) -> Result<SmartDonationBox, Box<dyn std::error::Error>> {
         let box_data = SmartDonationBox {
             box_id: box_id.clone(),
             location,
@@ -120,24 +125,31 @@ impl IoTService {
             total_donations: 0,
             is_active: true,
         };
-        
+
         self.donation_boxes.insert(box_id, box_data.clone());
         Ok(box_data)
     }
 
     /// Record a donation to a smart donation box
-    pub fn record_donation(&mut self, box_id: &str, amount: f64, donor_address: Option<String>) -> Result<DonationBoxTransaction, Box<dyn std::error::Error>> {
-        let box_data = self.donation_boxes.get_mut(box_id)
+    pub fn record_donation(
+        &mut self,
+        box_id: &str,
+        amount: f64,
+        donor_address: Option<String>,
+    ) -> Result<DonationBoxTransaction, Box<dyn std::error::Error>> {
+        let box_data = self
+            .donation_boxes
+            .get_mut(box_id)
             .ok_or("Donation box not found")?;
-        
+
         if !box_data.is_active {
             return Err("Donation box is not active".into());
         }
-        
+
         box_data.balance += amount;
         box_data.total_donations += 1;
         box_data.last_donation = Some(Utc::now().naive_utc());
-        
+
         let transaction = DonationBoxTransaction {
             transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
             box_id: box_id.to_string(),
@@ -145,7 +157,7 @@ impl IoTService {
             donor_address,
             timestamp: Utc::now().naive_utc(),
         };
-        
+
         Ok(transaction)
     }
 
@@ -155,7 +167,12 @@ impl IoTService {
     }
 
     /// Register an NFC wristband for a refugee
-    pub fn register_wristband(&mut self, wristband_id: String, refugee_id: String, camp_id: String) -> Result<NFCWristband, Box<dyn std::error::Error>> {
+    pub fn register_wristband(
+        &mut self,
+        wristband_id: String,
+        refugee_id: String,
+        camp_id: String,
+    ) -> Result<NFCWristband, Box<dyn std::error::Error>> {
         let wristband = NFCWristband {
             wristband_id: wristband_id.clone(),
             refugee_id,
@@ -165,40 +182,54 @@ impl IoTService {
             created_at: Utc::now().naive_utc(),
             is_active: true,
         };
-        
+
         self.wristbands.insert(wristband_id, wristband.clone());
         Ok(wristband)
     }
 
     /// Add funds to an NFC wristband
-    pub fn add_funds_to_wristband(&mut self, wristband_id: &str, amount: f64) -> Result<(), Box<dyn std::error::Error>> {
-        let wristband = self.wristbands.get_mut(wristband_id)
+    pub fn add_funds_to_wristband(
+        &mut self,
+        wristband_id: &str,
+        amount: f64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let wristband = self
+            .wristbands
+            .get_mut(wristband_id)
             .ok_or("Wristband not found")?;
-        
+
         if !wristband.is_active {
             return Err("Wristband is not active".into());
         }
-        
+
         wristband.balance += amount;
         Ok(())
     }
 
     /// Process a transaction with an NFC wristband
-    pub fn process_wristband_transaction(&mut self, wristband_id: &str, amount: f64, transaction_type: String, vendor_id: String) -> Result<WristbandTransaction, Box<dyn std::error::Error>> {
-        let wristband = self.wristbands.get_mut(wristband_id)
+    pub fn process_wristband_transaction(
+        &mut self,
+        wristband_id: &str,
+        amount: f64,
+        transaction_type: String,
+        vendor_id: String,
+    ) -> Result<WristbandTransaction, Box<dyn std::error::Error>> {
+        let wristband = self
+            .wristbands
+            .get_mut(wristband_id)
             .ok_or("Wristband not found")?;
-        
+
         if !wristband.is_active {
             return Err("Wristband is not active".into());
         }
-        
+
         if wristband.balance < amount {
             return Err("Insufficient balance on wristband".into());
         }
-        
+
         wristband.balance -= amount;
         wristband.last_transaction = Some(Utc::now().naive_utc());
-        
+
         let transaction = WristbandTransaction {
             transaction_id: format!("tx_{}", uuid::Uuid::new_v4()),
             wristband_id: wristband_id.to_string(),
@@ -207,7 +238,7 @@ impl IoTService {
             vendor_id,
             timestamp: Utc::now().naive_utc(),
         };
-        
+
         Ok(transaction)
     }
 
@@ -217,7 +248,13 @@ impl IoTService {
     }
 
     /// Create a new food distribution QR code
-    pub fn create_food_qr(&mut self, distribution_point: String, food_type: String, quantity: u32, expiration_date: NaiveDateTime) -> Result<FoodDistributionQR, Box<dyn std::error::Error>> {
+    pub fn create_food_qr(
+        &mut self,
+        distribution_point: String,
+        food_type: String,
+        quantity: u32,
+        expiration_date: NaiveDateTime,
+    ) -> Result<FoodDistributionQR, Box<dyn std::error::Error>> {
         let qr = FoodDistributionQR {
             qr_id: format!("qr_{}", uuid::Uuid::new_v4()),
             distribution_point,
@@ -228,16 +265,21 @@ impl IoTService {
             claimed_by: None,
             claimed_at: None,
         };
-        
+
         self.food_qr_codes.insert(qr.qr_id.clone(), qr.clone());
         Ok(qr)
     }
 
     /// Claim a food distribution QR code
-    pub fn claim_food_qr(&mut self, request: QRClaimRequest) -> Result<QRClaimResponse, Box<dyn std::error::Error>> {
-        let qr = self.food_qr_codes.get_mut(&request.qr_id)
+    pub fn claim_food_qr(
+        &mut self,
+        request: QRClaimRequest,
+    ) -> Result<QRClaimResponse, Box<dyn std::error::Error>> {
+        let qr = self
+            .food_qr_codes
+            .get_mut(&request.qr_id)
             .ok_or("QR code not found")?;
-        
+
         if qr.is_claimed {
             return Ok(QRClaimResponse {
                 success: false,
@@ -245,7 +287,7 @@ impl IoTService {
                 claimed_quantity: 0,
             });
         }
-        
+
         let now = Utc::now().naive_utc();
         if now > qr.expiration_date {
             return Ok(QRClaimResponse {
@@ -254,11 +296,11 @@ impl IoTService {
                 claimed_quantity: 0,
             });
         }
-        
+
         qr.is_claimed = true;
         qr.claimed_by = Some(request.recipient_id);
         qr.claimed_at = Some(now);
-        
+
         Ok(QRClaimResponse {
             success: true,
             message: "Food distribution claimed successfully".to_string(),
@@ -283,7 +325,7 @@ mod tests {
             api_endpoint: "https://api.example.com".to_string(),
             auth_token: "test_token".to_string(),
         };
-        
+
         let service = IoTService::new(config);
         assert!(service.donation_boxes.is_empty());
         assert!(service.wristbands.is_empty());
@@ -296,15 +338,15 @@ mod tests {
             api_endpoint: "https://api.example.com".to_string(),
             auth_token: "test_token".to_string(),
         };
-        
+
         let mut service = IoTService::new(config);
-        
+
         let result = service.register_donation_box(
             "box123".to_string(),
             "Central Park".to_string(),
-            "0x1234567890abcdef".to_string()
+            "0x1234567890abcdef".to_string(),
         );
-        
+
         assert!(result.is_ok());
         let box_data = result.unwrap();
         assert_eq!(box_data.box_id, "box123");
@@ -319,25 +361,31 @@ mod tests {
             api_endpoint: "https://api.example.com".to_string(),
             auth_token: "test_token".to_string(),
         };
-        
+
         let mut service = IoTService::new(config);
-        
+
         // Register a box first
-        service.register_donation_box(
-            "box123".to_string(),
-            "Central Park".to_string(),
-            "0x1234567890abcdef".to_string()
-        ).unwrap();
-        
+        service
+            .register_donation_box(
+                "box123".to_string(),
+                "Central Park".to_string(),
+                "0x1234567890abcdef".to_string(),
+            )
+            .unwrap();
+
         // Record a donation
-        let result = service.record_donation("box123", 50.0, Some("0xabcdef1234567890".to_string()));
-        
+        let result =
+            service.record_donation("box123", 50.0, Some("0xabcdef1234567890".to_string()));
+
         assert!(result.is_ok());
         let transaction = result.unwrap();
         assert_eq!(transaction.box_id, "box123");
         assert_eq!(transaction.amount, 50.0);
-        assert_eq!(transaction.donor_address, Some("0xabcdef1234567890".to_string()));
-        
+        assert_eq!(
+            transaction.donor_address,
+            Some("0xabcdef1234567890".to_string())
+        );
+
         // Check box status
         let box_status = service.get_donation_box_status("box123").unwrap();
         assert_eq!(box_status.balance, 50.0);
@@ -351,15 +399,15 @@ mod tests {
             api_endpoint: "https://api.example.com".to_string(),
             auth_token: "test_token".to_string(),
         };
-        
+
         let mut service = IoTService::new(config);
-        
+
         let result = service.register_wristband(
             "wristband123".to_string(),
             "refugee456".to_string(),
-            "camp789".to_string()
+            "camp789".to_string(),
         );
-        
+
         assert!(result.is_ok());
         let wristband = result.unwrap();
         assert_eq!(wristband.wristband_id, "wristband123");
@@ -374,39 +422,41 @@ mod tests {
             api_endpoint: "https://api.example.com".to_string(),
             auth_token: "test_token".to_string(),
         };
-        
+
         let mut service = IoTService::new(config);
-        
+
         // Register a wristband
-        service.register_wristband(
-            "wristband123".to_string(),
-            "refugee456".to_string(),
-            "camp789".to_string()
-        ).unwrap();
-        
+        service
+            .register_wristband(
+                "wristband123".to_string(),
+                "refugee456".to_string(),
+                "camp789".to_string(),
+            )
+            .unwrap();
+
         // Add funds
         let result = service.add_funds_to_wristband("wristband123", 100.0);
         assert!(result.is_ok());
-        
+
         // Check balance
         let wristband = service.get_wristband_status("wristband123").unwrap();
         assert_eq!(wristband.balance, 100.0);
-        
+
         // Process transaction
         let result = service.process_wristband_transaction(
             "wristband123",
             25.0,
             "food".to_string(),
-            "vendor123".to_string()
+            "vendor123".to_string(),
         );
-        
+
         assert!(result.is_ok());
         let transaction = result.unwrap();
         assert_eq!(transaction.wristband_id, "wristband123");
         assert_eq!(transaction.amount, 25.0);
         assert_eq!(transaction.transaction_type, "food");
         assert_eq!(transaction.vendor_id, "vendor123");
-        
+
         // Check updated balance
         let wristband = service.get_wristband_status("wristband123").unwrap();
         assert_eq!(wristband.balance, 75.0);
@@ -418,19 +468,19 @@ mod tests {
             api_endpoint: "https://api.example.com".to_string(),
             auth_token: "test_token".to_string(),
         };
-        
+
         let mut service = IoTService::new(config);
-        
+
         let expiration = Utc::now().naive_utc() + Duration::days(7);
-        
+
         // Create QR code
         let result = service.create_food_qr(
             "Food Bank Downtown".to_string(),
             "Rice".to_string(),
             10,
-            expiration
+            expiration,
         );
-        
+
         assert!(result.is_ok());
         let qr = result.unwrap();
         assert_eq!(qr.distribution_point, "Food Bank Downtown");
@@ -440,20 +490,20 @@ mod tests {
         assert!(!qr.is_claimed);
         assert!(qr.claimed_by.is_none());
         assert!(qr.claimed_at.is_none());
-        
+
         // Claim QR code
         let request = QRClaimRequest {
             qr_id: qr.qr_id.clone(),
             recipient_id: "recipient123".to_string(),
             recipient_nfc_id: Some("nfc456".to_string()),
         };
-        
+
         let result = service.claim_food_qr(request);
         assert!(result.is_ok());
         let response = result.unwrap();
         assert!(response.success);
         assert_eq!(response.claimed_quantity, 10);
-        
+
         // Check QR status
         let qr_status = service.get_qr_status(&qr.qr_id).unwrap();
         assert!(qr_status.is_claimed);

@@ -16,4 +16,3 @@ pub fn to_f64(d: Decimal) -> f64 {
 pub fn round_dp(d: Decimal, dp: u32) -> Decimal {
     d.round_dp(dp)
 }
-

@@ -1,5 +1,5 @@
 //! AI service module for P-Project
-//! 
+//!
 //! This module provides AI-powered features including:
 //! - Impact verification chatbots
 //! - AI-generated Peace NFT art
@@ -128,26 +128,30 @@ impl AIService {
     }
 
     /// Verify impact based on user activity and evidence
-    pub async fn verify_impact(&self, request: ImpactVerificationRequest) -> Result<ImpactVerificationResponse, Box<dyn std::error::Error>> {
+    pub async fn verify_impact(
+        &self,
+        request: ImpactVerificationRequest,
+    ) -> Result<ImpactVerificationResponse, Box<dyn std::error::Error>> {
         // In a real implementation, this would call an AI service API
         // For now, we'll simulate the response
-        
+
         let verification_id = format!("ver_{}", uuid::Uuid::new_v4());
-        
+
         // Simulate AI processing
         let confidence_score = 0.85;
         let verified = confidence_score > 0.7;
         let feedback = if verified {
-            "Activity verified with high confidence. Evidence supports the claimed impact.".to_string()
+            "Activity verified with high confidence. Evidence supports the claimed impact."
+                .to_string()
         } else {
             "Activity could not be fully verified. Additional evidence recommended.".to_string()
         };
-        
+
         let recommendations = vec![
             "Consider providing more detailed evidence for future activities".to_string(),
             "Add geotagged photos to strengthen verification".to_string(),
         ];
-        
+
         Ok(ImpactVerificationResponse {
             verification_id,
             confidence_score,
@@ -158,19 +162,22 @@ impl AIService {
     }
 
     /// Generate AI art for Peace NFTs
-    pub async fn generate_peace_nft_art(&self, request: AINFTArtRequest) -> Result<AINFTArtResponse, Box<dyn std::error::Error>> {
+    pub async fn generate_peace_nft_art(
+        &self,
+        request: AINFTArtRequest,
+    ) -> Result<AINFTArtResponse, Box<dyn std::error::Error>> {
         // In a real implementation, this would call an AI image generation API
         // For now, we'll simulate the response
-        
+
         // Simulate generation time
         let generation_time_ms = 2500;
-        
+
         // Simulate base64 encoded image data
         let image_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==".to_string();
-        
+
         // Simulate metadata URI
         let metadata_uri = format!("ipfs://Qm{}", uuid::Uuid::new_v4());
-        
+
         Ok(AINFTArtResponse {
             image_data,
             metadata_uri,
@@ -179,23 +186,26 @@ impl AIService {
     }
 
     /// Detect fraud in NGO transactions
-    pub async fn detect_fraud(&self, request: FraudDetectionRequest) -> Result<FraudDetectionResponse, Box<dyn std::error::Error>> {
+    pub async fn detect_fraud(
+        &self,
+        request: FraudDetectionRequest,
+    ) -> Result<FraudDetectionResponse, Box<dyn std::error::Error>> {
         // In a real implementation, this would use ML models to detect fraud
         // For now, we'll simulate the response
-        
+
         let analysis_id = format!("fraud_{}", uuid::Uuid::new_v4());
-        
+
         // Simulate risk score calculation
         let risk_score = 0.3; // Low risk in this simulation
-        
+
         // Simulate suspicious activities detection
         let suspicious_activities = vec![];
-        
+
         let recommendations = vec![
             "Continue monitoring transaction patterns".to_string(),
             "Review recipient verification processes".to_string(),
         ];
-        
+
         Ok(FraudDetectionResponse {
             analysis_id,
             risk_score,
@@ -205,26 +215,29 @@ impl AIService {
     }
 
     /// Generate AI-powered memes
-    pub async fn generate_meme(&self, request: AIMemeRequest) -> Result<AIMemeResponse, Box<dyn std::error::Error>> {
+    pub async fn generate_meme(
+        &self,
+        request: AIMemeRequest,
+    ) -> Result<AIMemeResponse, Box<dyn std::error::Error>> {
         // In a real implementation, this would call an AI image generation API
         // For now, we'll simulate the response
-        
+
         // Simulate generation time
         let generation_time_ms = 3000;
-        
+
         // Simulate base64 encoded image data
         let image_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==".to_string();
-        
+
         // Simulate metadata URI
         let metadata_uri = format!("ipfs://Qm{}", uuid::Uuid::new_v4());
-        
+
         // Simulate meme text based on prompt
         let meme_text = if request.prompt.len() > 20 {
             request.prompt[..20].to_string() + "..."
         } else {
             request.prompt.clone()
         };
-        
+
         Ok(AIMemeResponse {
             image_data,
             metadata_uri,
@@ -246,7 +259,7 @@ mod tests {
             model: "gpt-4".to_string(),
             temperature: 0.7,
         };
-        
+
         let service = AIService::new(config);
         assert_eq!(service.config.model, "gpt-4");
     }
@@ -258,13 +271,13 @@ mod tests {
             model: "gpt-4".to_string(),
             temperature: 0.7,
         };
-        
+
         let service = AIService::new(config);
-        
+
         let mut impact_metrics = HashMap::new();
         impact_metrics.insert("people_helped".to_string(), 100.0);
         impact_metrics.insert("hours_volunteered".to_string(), 50.0);
-        
+
         let request = ImpactVerificationRequest {
             user_id: "user123".to_string(),
             ngo_id: "ngo456".to_string(),
@@ -272,7 +285,7 @@ mod tests {
             evidence_urls: vec!["https://example.com/photo1.jpg".to_string()],
             impact_metrics,
         };
-        
+
         let response = service.verify_impact(request).await.unwrap();
         assert!(!response.verification_id.is_empty());
         assert!(response.confidence_score > 0.0);
@@ -285,16 +298,16 @@ mod tests {
             model: "dall-e".to_string(),
             temperature: 0.7,
         };
-        
+
         let service = AIService::new(config);
-        
+
         let request = AINFTArtRequest {
             prompt: "Peaceful landscape with mountains and lake".to_string(),
             style: "realistic".to_string(),
             width: 512,
             height: 512,
         };
-        
+
         let response = service.generate_peace_nft_art(request).await.unwrap();
         assert!(!response.image_data.is_empty());
         assert!(!response.metadata_uri.is_empty());
@@ -308,9 +321,9 @@ mod tests {
             model: "fraud-detection-model".to_string(),
             temperature: 0.7,
         };
-        
+
         let service = AIService::new(config);
-        
+
         let transaction_data = vec![TransactionData {
             transaction_id: "tx123".to_string(),
             amount: 1000.0,
@@ -318,20 +331,20 @@ mod tests {
             timestamp: chrono::Utc::now().naive_utc(),
             category: "supplies".to_string(),
         }];
-        
+
         let historical_patterns = vec![HistoricalPattern {
             pattern_type: "supply_purchase".to_string(),
             frequency: 10,
             average_amount: 500.0,
             risk_score: 0.1,
         }];
-        
+
         let request = FraudDetectionRequest {
             ngo_id: "ngo456".to_string(),
             transaction_data,
             historical_patterns,
         };
-        
+
         let response = service.detect_fraud(request).await.unwrap();
         assert!(!response.analysis_id.is_empty());
         assert!(response.risk_score >= 0.0 && response.risk_score <= 1.0);
@@ -344,9 +357,9 @@ mod tests {
             model: "dall-e-meme".to_string(),
             temperature: 0.7,
         };
-        
+
         let service = AIService::new(config);
-        
+
         let request = AIMemeRequest {
             prompt: "Funny cat with sunglasses".to_string(),
             style: "comic".to_string(),
@@ -354,7 +367,7 @@ mod tests {
             height: 512,
             template: Some("drake-pointing".to_string()),
         };
-        
+
         let response = service.generate_meme(request).await.unwrap();
         assert!(!response.image_data.is_empty());
         assert!(!response.metadata_uri.is_empty());

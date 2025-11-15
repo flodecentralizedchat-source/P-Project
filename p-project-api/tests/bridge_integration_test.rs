@@ -28,8 +28,14 @@ async fn test_bridge_endpoints() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = AppState { db: Arc::new(db) };
     let app = Router::new()
         .route("/bridge", axum::routing::post(handlers::bridge_tokens))
-        .route("/bridge/status", axum::routing::post(handlers::get_bridge_status))
-        .route("/metrics", axum::routing::get(handlers::get_performance_metrics))
+        .route(
+            "/bridge/status",
+            axum::routing::post(handlers::get_bridge_status),
+        )
+        .route(
+            "/metrics",
+            axum::routing::get(handlers::get_performance_metrics),
+        )
         .with_state(app_state);
 
     // Test bridge endpoint with invalid amount

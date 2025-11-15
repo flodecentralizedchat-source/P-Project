@@ -78,3 +78,42 @@ fn test_liquidity_mining_program() {
     assert!(user2_rewards > user1_rewards);
     assert!((user2_rewards / user1_rewards - 2.0).abs() < 0.001);
 }
+
+#[test]
+fn test_ngo_treasury_registration_and_funding() {
+    let mut treasury = Treasury::new();
+    treasury.add_funds("USD".to_string(), 500000.0).unwrap();
+
+    treasury
+        .register_ngo_treasury("ngo-alpha".to_string(), "Emergency aid".to_string())
+        .unwrap();
+
+    let result = treasury.fund_ngo_treasury("ngo-alpha", 200000.0);
+    assert!(result.is_ok());
+
+    let account = treasury
+        .get_ngo_treasury("ngo-alpha")
+        .expect("NGO treasury should exist");
+    assert_eq!(account.balance, 200000.0);
+    assert_eq!(treasury.get_balance("USD"), 300000.0);
+    assert_eq!(account.records.last().unwrap().record_type, "deposit");
+}
+
+#[test]
+fn test_ngo_treasury_withdrawal() {
+    let mut treasury = Treasury::new();
+    treasury.add_funds("USD".to_string(), 500000.0).unwrap();
+    treasury
+        .register_ngo_treasury("ngo-alpha".to_string(), "Emergency aid".to_string())
+        .unwrap();
+    treasury.fund_ngo_treasury("ngo-alpha", 200000.0).unwrap();
+
+    let withdrawn = treasury
+        .withdraw_from_ngo_treasury("ngo-alpha", 50000.0)
+        .unwrap();
+    assert_eq!(withdrawn, 50000.0);
+
+    let account = treasury.get_ngo_treasury("ngo-alpha").unwrap();
+    assert_eq!(account.balance, 150000.0);
+    assert_eq!(account.records.last().unwrap().record_type, "withdraw");
+}

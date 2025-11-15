@@ -22,3 +22,4 @@ serde.workspace = true
 tokio.workspace = true
 chrono.workspace = true
 sqlx.workspace = true
+rust_decimal.workspace = true

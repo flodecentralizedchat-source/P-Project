@@ -226,8 +226,25 @@ Our WebAssembly-powered frontend provides:
 | `/iot/create-food-qr` | POST | Create a food distribution QR code |
 | `/iot/claim-food-qr` | POST | Claim food using a QR code |
 | `/web2/create-donation-widget` | POST | Create a social media donation widget |
+| `/web2/generate-widget-html` | POST | Generate embeddable donation widget HTML |
+| `/web2/process-social-donation` | POST | Process donation from widget |
 | `/web2/process-youtube-tip` | POST | Process a YouTube tip transaction |
+| `/web2/create-youtube-tip-config` | POST | Configure YouTube tipping options |
 | `/web2/register-messaging-bot` | POST | Register a messaging platform bot |
+| `/web2/process-bot-command` | POST | Process a bot command (generic) |
+| `/web2/telegram/webhook` | POST | Telegram webhook (token-gated) |
+| `/web2/discord/webhook` | POST | Discord webhook (token-gated) |
+| `/game/complete-mission` | POST | Report mission completion (protected) |
+| `/game/record-behavior` | POST | Record positive behavior for tokens |
+| `/game/balance/:player_id` | GET | Query a player's in-game balance |
+| `/game/register-mission` | POST | Register a peaceful mission (admin) |
+| `/credit/register-ngo` | POST | Register an NGO partner to underwrite micro-loans |
+| `/tokenomics/summary` | GET | Get parsed tokenomics & price model summary |
+| `/credit/add-impact-event` | POST | Record a verified social impact event for scoring |
+| `/credit/request-loan` | POST | Request a P-Coin-collateral micro-loan |
+| `/credit/repay-loan` | POST | Repay an active micro-loan |
+| `/credit/loan/:loan_id` | GET | Inspect a micro-loan |
+| `/credit/score/:user_id` | GET | Query a user's credit score |
 
 ## 🤝 Community & Social
 

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct User {
@@ -25,6 +25,65 @@ pub struct TokenTransaction {
     pub amount: Decimal,
     pub transaction_type: TransactionType,
     pub timestamp: chrono::NaiveDateTime,
+}
+
+// Remittance domain models
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RemittanceStatus {
+    Initiated,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Remittance {
+    pub id: String,
+    pub from_user_id: String,
+    pub to_user_id: String,
+    pub amount: Decimal,
+    pub fee: Decimal,
+    pub net_amount: Decimal,
+    pub status: RemittanceStatus,
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+}
+
+// Learning structures
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum LearningContentType {
+    Course,
+    Quiz,
+    Workshop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum LearningActivityType {
+    CourseCompletion,
+    QuizCompletion,
+    WorkshopParticipation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningContent {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub content_type: LearningContentType,
+    pub reward_tokens: Decimal,
+    pub reward_points: i64,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningCompletion {
+    pub id: String,
+    pub user_id: String,
+    pub content_id: String,
+    pub activity_type: LearningActivityType,
+    pub reward_tokens: Decimal,
+    pub reward_points: i64,
+    pub proof_reference: Option<String>,
+    pub completed_at: chrono::NaiveDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,11 +122,11 @@ pub enum ProposalStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProposalExecutionType {
-    TokenTransfer,     // Transfer tokens from treasury
-    ParameterChange,   // Change system parameters
-    ContractUpgrade,   // Upgrade contract logic
-    Airdrop,           // Distribute tokens to users
-    StakingReward,     // Distribute staking rewards
+    TokenTransfer,   // Transfer tokens from treasury
+    ParameterChange, // Change system parameters
+    ContractUpgrade, // Upgrade contract logic
+    Airdrop,         // Distribute tokens to users
+    StakingReward,   // Distribute staking rewards
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

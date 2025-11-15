@@ -63,38 +63,26 @@ async fn main() -> Result<()> {
     // seed balances directly
     seed_balance(&pool, &alice.id, 150.0).await?;
 
-    let mut req = client
-        .post(&format!("{}/transfer", api_base))
-        .json(&json!({
-            "from_user_id": alice.id,
-            "to_user_id": bob.id,
-            "amount": 50.0
-        }));
+    let mut req = client.post(&format!("{}/transfer", api_base)).json(&json!({
+        "from_user_id": alice.id,
+        "to_user_id": bob.id,
+        "amount": 50.0
+    }));
     if let Ok(token) = env::var("AUTH_TOKEN") {
         req = req.bearer_auth(token);
     }
-    let transfer = req
-        .send()
-        .await?
-        .json::<TransferResponse>()
-        .await?;
+    let transfer = req.send().await?.json::<TransferResponse>().await?;
     println!("Transfer completed: {:#?}", transfer);
 
-    let mut stake_req = client
-        .post(&format!("{}/stake", api_base))
-        .json(&json!({
-            "user_id": alice.id,
-            "amount": 40.0,
-            "duration_days": 7
-        }));
+    let mut stake_req = client.post(&format!("{}/stake", api_base)).json(&json!({
+        "user_id": alice.id,
+        "amount": 40.0,
+        "duration_days": 7
+    }));
     if let Ok(token) = env::var("AUTH_TOKEN") {
         stake_req = stake_req.bearer_auth(token);
     }
-    let stake = stake_req
-        .send()
-        .await?
-        .json::<StakingInfo>()
-        .await?;
+    let stake = stake_req.send().await?.json::<StakingInfo>().await?;
     println!("Stake recorded: {:#?}", stake);
 
     let mut unstake_req = client
@@ -103,10 +91,7 @@ async fn main() -> Result<()> {
     if let Ok(token) = env::var("AUTH_TOKEN") {
         unstake_req = unstake_req.bearer_auth(token);
     }
-    let unstake = unstake_req.send()
-        .await?
-        .json::<StakingInfo>()
-        .await?;
+    let unstake = unstake_req.send().await?.json::<StakingInfo>().await?;
     println!("Unstaked: {:#?}", unstake);
 
     let airdrop_id = format!("airdrop-{}", uuid::Uuid::new_v4());
@@ -122,9 +107,7 @@ async fn main() -> Result<()> {
     if let Ok(token) = env::var("AUTH_TOKEN") {
         ad_req = ad_req.bearer_auth(token);
     }
-    ad_req.send()
-        .await?
-        .error_for_status()?;
+    ad_req.send().await?.error_for_status()?;
 
     let mut claim_req = client
         .post(&format!("{}/airdrop/claim", api_base))
@@ -135,7 +118,8 @@ async fn main() -> Result<()> {
     if let Ok(token) = env::var("AUTH_TOKEN") {
         claim_req = claim_req.bearer_auth(token);
     }
-    let claim = claim_req.send()
+    let claim = claim_req
+        .send()
         .await?
         .json::<AirdropClaimResponse>()
         .await?;

@@ -6,4 +6,3 @@ pub type Amount = rust_decimal::Decimal;
 
 #[cfg(not(feature = "decimal-amount"))]
 pub type Amount = f64;
-

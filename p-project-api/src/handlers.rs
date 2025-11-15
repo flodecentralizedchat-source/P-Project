@@ -1,17 +1,25 @@
 use axum::{
-    extract::{Path, State, Extension},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     Json,
 };
 use p_project_bridge::BridgeService;
 use p_project_core::database::{BalanceError, MySqlDatabase};
-use p_project_core::models::{Proposal, ProposalStatus, TransactionType, User};
-use p_project_core::{AIService, AIServiceConfig, IoTService, IoTServiceConfig, Web2Service, Web2ServiceConfig};
-use serde::{Deserialize, Serialize};
-use rust_decimal::Decimal;
+use p_project_core::models::{
+    LearningCompletion, LearningContent, LearningContentType, Proposal, ProposalStatus, Remittance,
+    TransactionType, User,
+};
+use p_project_core::{
+    AIService, AIServiceConfig, CreditService, CreditServiceConfig, GameCurrencyConfig,
+    GameCurrencyService, IoTService, IoTServiceConfig, TokenomicsService, Web2Service,
+    Web2ServiceConfig,
+};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-use std::sync::Arc;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
+use std::sync::Arc;
 
 use crate::shared::AppState;
 
@@ -39,9 +47,10 @@ fn env_ai_config() -> Result<AIServiceConfig, String> {
 }
 
 fn env_iot_config() -> Result<IoTServiceConfig, String> {
-    let api_endpoint = env::var("IOT_API_ENDPOINT")
-        .map_err(|_| "IOT_API_ENDPOINT not set".to_string())?;
-    let auth_token = env::var("IOT_AUTH_TOKEN").map_err(|_| "IOT_AUTH_TOKEN not set".to_string())?;
+    let api_endpoint =
+        env::var("IOT_API_ENDPOINT").map_err(|_| "IOT_API_ENDPOINT not set".to_string())?;
+    let auth_token =
+        env::var("IOT_AUTH_TOKEN").map_err(|_| "IOT_AUTH_TOKEN not set".to_string())?;
     Ok(IoTServiceConfig {
         api_endpoint,
         auth_token,
@@ -51,15 +60,149 @@ fn env_iot_config() -> Result<IoTServiceConfig, String> {
 fn env_web2_config() -> Result<Web2ServiceConfig, String> {
     // Collect API keys if present; optional
     let mut api_keys = std::collections::HashMap::new();
-    if let Ok(v) = env::var("WEB2_FACEBOOK_KEY") { api_keys.insert("facebook".to_string(), v); }
-    if let Ok(v) = env::var("WEB2_YOUTUBE_KEY") { api_keys.insert("youtube".to_string(), v); }
-    if let Ok(v) = env::var("WEB2_TELEGRAM_KEY") { api_keys.insert("telegram".to_string(), v); }
-    if let Ok(v) = env::var("WEB2_DISCORD_KEY") { api_keys.insert("discord".to_string(), v); }
+    if let Ok(v) = env::var("WEB2_FACEBOOK_KEY") {
+        api_keys.insert("facebook".to_string(), v);
+    }
+    if let Ok(v) = env::var("WEB2_YOUTUBE_KEY") {
+        api_keys.insert("youtube".to_string(), v);
+    }
+    if let Ok(v) = env::var("WEB2_TELEGRAM_KEY") {
+        api_keys.insert("telegram".to_string(), v);
+    }
+    if let Ok(v) = env::var("WEB2_DISCORD_KEY") {
+        api_keys.insert("discord".to_string(), v);
+    }
     let webhook_url = env::var("WEB2_WEBHOOK_URL").unwrap_or_else(|_| "".to_string());
-    Ok(Web2ServiceConfig { api_keys, webhook_url })
+    Ok(Web2ServiceConfig {
+        api_keys,
+        webhook_url,
+    })
 }
 
-fn ensure_roles(claims: &crate::middleware::Claims, allowed: &[&str]) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+fn env_learning_reward_source() -> Option<String> {
+    env::var("LEARNING_REWARD_SOURCE_ID").ok()
+}
+
+#[derive(Debug, Clone)]
+struct RemittanceConfig {
+    fee_rate: f64,
+    min_fee: f64,
+    fee_account_id: Option<String>,
+}
+
+fn env_remittance_config() -> RemittanceConfig {
+    let fee_rate = env::var("REMITTANCE_FEE_RATE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(0.001);
+    let min_fee = env::var("REMITTANCE_MIN_FEE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let fee_account_id = env::var("REMITTANCE_FEE_ACCOUNT_ID").ok();
+    RemittanceConfig {
+        fee_rate,
+        min_fee,
+        fee_account_id,
+    }
+}
+
+fn compute_remittance_fee(amount: Decimal, cfg: &RemittanceConfig) -> Decimal {
+    let rate_fee = amount * Decimal::from_f64(cfg.fee_rate).unwrap_or(Decimal::ZERO);
+    let min_fee = Decimal::from_f64(cfg.min_fee).unwrap_or(Decimal::ZERO);
+    if rate_fee < min_fee {
+        min_fee
+    } else {
+        rate_fee
+    }
+}
+
+fn env_credit_config() -> Result<CreditServiceConfig, String> {
+    let min_credit_score = env::var("CREDIT_MIN_SCORE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(60.0);
+    let max_loan_amount = env::var("CREDIT_MAX_LOAN_AMOUNT")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(1000.0);
+    let collateral_ratio = env::var("CREDIT_COLLATERAL_RATIO")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(0.5);
+    let default_interest_rate = env::var("CREDIT_INTEREST_RATE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(0.08);
+    let base_score = env::var("CREDIT_BASE_SCORE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(50.0);
+    let max_duration_days = env::var("CREDIT_MAX_DURATION_DAYS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(30);
+
+    Ok(CreditServiceConfig {
+        min_credit_score,
+        max_loan_amount,
+        collateral_ratio,
+        default_interest_rate,
+        base_score,
+        max_duration_days,
+    })
+}
+
+fn env_tokenomics_path() -> Result<String, String> {
+    Ok(std::env::var("TOKENOMICS_CSV_PATH")
+        .unwrap_or_else(|_| "tokenomics_master_price.csv".to_string()))
+}
+
+fn env_game_currency_config() -> Result<GameCurrencyConfig, String> {
+    let base_mission_reward = env::var("GAME_BASE_MISSION_REWARD")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(25.0);
+    let mut behavior_rewards = HashMap::new();
+    behavior_rewards.insert(
+        p_project_core::PositiveBehavior::HelpingHands,
+        env::var("GAME_BEHAVIOR_HELPING_HANDS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(15.0),
+    );
+    behavior_rewards.insert(
+        p_project_core::PositiveBehavior::EnvironmentalCare,
+        env::var("GAME_BEHAVIOR_ENVIRONMENTAL")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(12.0),
+    );
+    behavior_rewards.insert(
+        p_project_core::PositiveBehavior::ConflictResolution,
+        env::var("GAME_BEHAVIOR_CONFLICT")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(18.0),
+    );
+    behavior_rewards.insert(
+        p_project_core::PositiveBehavior::EducationChampion,
+        env::var("GAME_BEHAVIOR_EDUCATION")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(10.0),
+    );
+
+    Ok(GameCurrencyConfig {
+        base_mission_reward,
+        behavior_rewards,
+    })
+}
+
+fn ensure_roles(
+    claims: &crate::middleware::Claims,
+    allowed: &[&str],
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
     let role = claims.role.as_deref().unwrap_or("user");
     if allowed.iter().any(|r| *r == role) {
         Ok(())
@@ -80,23 +223,47 @@ pub struct WhoAmIResponse {
     pub exp: usize,
 }
 
-pub async fn whoami(headers: axum::http::HeaderMap) -> Result<Json<WhoAmIResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let secret = std::env::var("JWT_SECRET")
-        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "unauthorized".to_string() })))?;
+pub async fn whoami(
+    headers: axum::http::HeaderMap,
+) -> Result<Json<WhoAmIResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let secret = std::env::var("JWT_SECRET").map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "unauthorized".to_string(),
+            }),
+        )
+    })?;
     let auth = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let token = auth.strip_prefix("Bearer ").unwrap_or("").trim();
     if token.is_empty() {
-        return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "unauthorized".to_string() })));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "unauthorized".to_string(),
+            }),
+        ));
     }
     let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
     let key = jsonwebtoken::DecodingKey::from_secret(secret.as_bytes());
     let data = jsonwebtoken::decode::<crate::middleware::Claims>(token, &key, &validation)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "unauthorized".to_string() })))?;
+        .map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: "unauthorized".to_string(),
+                }),
+            )
+        })?;
     let c = data.claims;
-    Ok(Json(WhoAmIResponse { sub: c.sub, role: c.role, exp: c.exp }))
+    Ok(Json(WhoAmIResponse {
+        sub: c.sub,
+        role: c.role,
+        exp: c.exp,
+    }))
 }
 
 // Users
@@ -124,7 +291,9 @@ pub async fn create_user(
         Ok(_user) => Ok(Json(CreateUserResponse { id })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -143,7 +312,9 @@ pub async fn get_user(
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -154,6 +325,32 @@ pub struct UpdateUserRequest {
     pub wallet_address: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateLearningContentRequest {
+    pub title: String,
+    pub description: String,
+    pub content_type: LearningContentType,
+    pub reward_tokens: Decimal,
+    pub reward_points: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LearningContentListQuery {
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LearningCompletionRequest {
+    pub user_id: String,
+    pub content_id: String,
+    pub proof_reference: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LearningCompletionListQuery {
+    pub limit: Option<i64>,
+}
+
 pub async fn update_user(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -161,11 +358,7 @@ pub async fn update_user(
 ) -> Result<Json<User>, (StatusCode, Json<ErrorResponse>)> {
     match state
         .db
-        .update_user(
-            &id,
-            req.username.as_deref(),
-            req.wallet_address.as_deref(),
-        )
+        .update_user(&id, req.username.as_deref(), req.wallet_address.as_deref())
         .await
     {
         Ok(Some(u)) => Ok(Json(u)),
@@ -177,7 +370,9 @@ pub async fn update_user(
         )),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -203,7 +398,7 @@ pub async fn transfer_tokens(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<TransferRequest>,
 ) -> Result<Json<TransferResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     if req.amount <= Decimal::ZERO {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -250,7 +445,371 @@ pub async fn transfer_tokens(
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+// -------------------- Remittance --------------------
+#[derive(Debug, Deserialize)]
+pub struct RemittanceQuoteRequest {
+    pub from_user_id: String,
+    pub to_user_id: String,
+    pub amount: Decimal,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RemittanceQuoteResponse {
+    pub amount: Decimal,
+    pub fee: Decimal,
+    pub total_debit: Decimal,
+    pub net_amount: Decimal,
+    pub fee_rate: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RemittanceInitiateRequest {
+    pub from_user_id: String,
+    pub to_user_id: String,
+    pub amount: Decimal,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RemittanceInitiateResponse {
+    pub remittance_id: String,
+    pub status: String,
+    pub amount: Decimal,
+    pub fee: Decimal,
+    pub net_amount: Decimal,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RemittanceListQuery {
+    pub limit: Option<i64>,
+}
+
+pub async fn remittance_quote(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<RemittanceQuoteRequest>,
+) -> Result<Json<RemittanceQuoteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    if req.amount <= Decimal::ZERO {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_amount".to_string(),
+            }),
+        ));
+    }
+    let cfg = env_remittance_config();
+    let fee = compute_remittance_fee(req.amount, &cfg).round_dp(8);
+    let net_amount = req.amount.round_dp(8);
+    let total_debit = (net_amount + fee).round_dp(8);
+    Ok(Json(RemittanceQuoteResponse {
+        amount: net_amount,
+        fee,
+        total_debit,
+        net_amount,
+        fee_rate: cfg.fee_rate,
+    }))
+}
+
+pub async fn remittance_initiate(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<RemittanceInitiateRequest>,
+) -> Result<Json<RemittanceInitiateResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    if req.amount <= Decimal::ZERO {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_amount".to_string(),
+            }),
+        ));
+    }
+
+    let cfg = env_remittance_config();
+    let fee = compute_remittance_fee(req.amount, &cfg).round_dp(8);
+    let remittance_id = p_project_core::utils::generate_id();
+    match state
+        .db
+        .process_remittance(
+            &remittance_id,
+            &req.from_user_id,
+            &req.to_user_id,
+            req.amount.round_dp(8),
+            fee,
+            cfg.fee_account_id.as_deref(),
+        )
+        .await
+    {
+        Ok(remit) => Ok(Json(RemittanceInitiateResponse {
+            remittance_id,
+            status: match remit.status {
+                p_project_core::models::RemittanceStatus::Initiated => "Initiated",
+                p_project_core::models::RemittanceStatus::Completed => "Completed",
+                p_project_core::models::RemittanceStatus::Failed => "Failed",
+            }
+            .to_string(),
+            amount: remit.amount,
+            fee: remit.fee,
+            net_amount: remit.net_amount,
+        })),
+        Err(BalanceError::InvalidAmount) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_amount".to_string(),
+            }),
+        )),
+        Err(BalanceError::InsufficientBalance) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "insufficient_balance".to_string(),
+            }),
+        )),
+        Err(BalanceError::UserNotFound) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "user_not_found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn remittance_get(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Path(id): Path<String>,
+) -> Result<Json<Remittance>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    match state.db.get_remittance(&id).await {
+        Ok(Some(remit)) => {
+            if claims.role.as_deref() != Some("admin")
+                && claims.sub != remit.from_user_id
+                && claims.sub != remit.to_user_id
+            {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(ErrorResponse {
+                        error: "forbidden".to_string(),
+                    }),
+                ));
+            }
+            Ok(Json(remit))
+        }
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "not_found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn remittance_list_for_user(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Path(user_id): Path<String>,
+    Query(query): Query<RemittanceListQuery>,
+) -> Result<Json<Vec<Remittance>>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    if claims.role.as_deref() != Some("admin") && claims.sub != user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "forbidden".to_string(),
+            }),
+        ));
+    }
+    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    match state.db.list_user_remittances(&user_id, limit).await {
+        Ok(list) => Ok(Json(list)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+// -------------------- Learning --------------------
+pub async fn create_learning_content(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<CreateLearningContentRequest>,
+) -> Result<Json<LearningContent>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["admin"])?;
+    let content_id = p_project_core::utils::generate_id();
+    match state
+        .db
+        .register_learning_content(
+            &content_id,
+            &req.title,
+            &req.description,
+            req.content_type,
+            req.reward_tokens.round_dp(8),
+            req.reward_points,
+        )
+        .await
+    {
+        Ok(content) => Ok(Json(content)),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn list_learning_content(
+    State(state): State<AppState>,
+    Query(query): Query<LearningContentListQuery>,
+) -> Result<Json<Vec<LearningContent>>, (StatusCode, Json<ErrorResponse>)> {
+    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    match state.db.list_learning_content(limit).await {
+        Ok(list) => Ok(Json(list)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn get_learning_content(
+    State(state): State<AppState>,
+    Path(content_id): Path<String>,
+) -> Result<Json<LearningContent>, (StatusCode, Json<ErrorResponse>)> {
+    match state.db.get_learning_content(&content_id).await {
+        Ok(Some(content)) => Ok(Json(content)),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "learning_content_not_found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn record_learning_completion(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<LearningCompletionRequest>,
+) -> Result<Json<LearningCompletion>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    if claims.role.as_deref() != Some("admin") && claims.sub != req.user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "forbidden".to_string(),
+            }),
+        ));
+    }
+    let completion_id = p_project_core::utils::generate_id();
+    let reward_source = env_learning_reward_source();
+    match state
+        .db
+        .record_learning_completion(
+            &completion_id,
+            &req.user_id,
+            &req.content_id,
+            req.proof_reference.as_deref(),
+            reward_source.as_deref(),
+        )
+        .await
+    {
+        Ok(record) => Ok(Json(record)),
+        Err(BalanceError::InvalidAmount) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_amount".to_string(),
+            }),
+        )),
+        Err(BalanceError::AlreadyCompleted) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "already_completed".to_string(),
+            }),
+        )),
+        Err(BalanceError::LearningContentNotFound) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "learning_content_not_found".to_string(),
+            }),
+        )),
+        Err(BalanceError::UserNotFound) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "user_not_found".to_string(),
+            }),
+        )),
+        Err(BalanceError::Sql(err)) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: err.to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn list_learning_completions_for_user(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Path(user_id): Path<String>,
+    Query(query): Query<LearningCompletionListQuery>,
+) -> Result<Json<Vec<LearningCompletion>>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    if claims.role.as_deref() != Some("admin") && claims.sub != user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "forbidden".to_string(),
+            }),
+        ));
+    }
+    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    match state
+        .db
+        .list_user_learning_completions(&user_id, limit)
+        .await
+    {
+        Ok(list) => Ok(Json(list)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -277,7 +836,7 @@ pub async fn stake_tokens(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<StakeRequest>,
 ) -> Result<Json<StakingInfoResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     if req.amount <= Decimal::ZERO {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -289,7 +848,12 @@ pub async fn stake_tokens(
     let stake_id = p_project_core::utils::generate_id();
     match state
         .db
-        .stake_tokens(&stake_id, &req.user_id, req.amount.round_dp(8), req.duration_days)
+        .stake_tokens(
+            &stake_id,
+            &req.user_id,
+            req.amount.round_dp(8),
+            req.duration_days,
+        )
         .await
     {
         Ok(info) => Ok(Json(StakingInfoResponse {
@@ -319,7 +883,9 @@ pub async fn stake_tokens(
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -334,7 +900,7 @@ pub async fn unstake_tokens(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<UnstakeRequest>,
 ) -> Result<Json<StakingInfoResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     match state.db.unstake_tokens(&req.user_id, None).await {
         Ok(info) => Ok(Json(StakingInfoResponse {
             user_id: info.user_id,
@@ -351,7 +917,9 @@ pub async fn unstake_tokens(
         )),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -391,7 +959,14 @@ pub async fn create_airdrop(
         .db
         .create_airdrop(&airdrop_id, req.total_amount.round_dp(8), None, None)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e.to_string() })))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: e.to_string(),
+                }),
+            )
+        })?;
 
     if let Some(list) = req.recipients.clone() {
         let vec_pairs: Vec<(String, Decimal)> = list
@@ -405,7 +980,9 @@ pub async fn create_airdrop(
             .map_err(|e| {
                 (
                     StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse { error: e.to_string() }),
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
                 )
             })?;
     }
@@ -431,11 +1008,7 @@ pub async fn claim_airdrop(
     State(state): State<AppState>,
     Json(req): Json<ClaimAirdropRequest>,
 ) -> Result<Json<AirdropClaimResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match state
-        .db
-        .claim_airdrop(&req.airdrop_id, &req.user_id)
-        .await
-    {
+    match state.db.claim_airdrop(&req.airdrop_id, &req.user_id).await {
         Ok(amount) => Ok(Json(AirdropClaimResponse {
             airdrop_id: req.airdrop_id,
             user_id: req.user_id,
@@ -444,7 +1017,9 @@ pub async fn claim_airdrop(
         })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -477,7 +1052,9 @@ pub async fn batch_claim_airdrops(
         })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -501,7 +1078,7 @@ pub async fn bridge_tokens(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<BridgeRequest>,
 ) -> Result<Json<BridgeResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     if req.amount <= Decimal::ZERO {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -512,14 +1089,18 @@ pub async fn bridge_tokens(
     }
     let svc = BridgeService::new(state.db.clone());
     match svc
-        .bridge_tokens(&req.user_id, &req.from_chain, &req.to_chain, req.amount.round_dp(8).to_f64().unwrap_or(0.0))
+        .bridge_tokens(
+            &req.user_id,
+            &req.from_chain,
+            &req.to_chain,
+            req.amount.round_dp(8).to_f64().unwrap_or(0.0),
+        )
         .await
     {
-        Ok(tx_id) => Ok(Json(BridgeResponse { transaction_id: tx_id })),
-        Err(e) => Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e }),
-        )),
+        Ok(tx_id) => Ok(Json(BridgeResponse {
+            transaction_id: tx_id,
+        })),
+        Err(e) => Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e }))),
     }
 }
 
@@ -682,7 +1263,7 @@ pub async fn create_proposal(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<CreateProposalRequest>,
 ) -> Result<Json<CreateProposalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     let proposal_id = p_project_core::utils::generate_id();
     Ok(Json(CreateProposalResponse { proposal_id }))
 }
@@ -704,7 +1285,7 @@ pub async fn vote_on_proposal(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<VoteProposalRequest>,
 ) -> Result<Json<VoteProposalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     Ok(Json(VoteProposalResponse {
         message: "Vote recorded successfully".to_string(),
     }))
@@ -726,7 +1307,7 @@ pub async fn tally_votes(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<TallyVotesRequest>,
 ) -> Result<Json<TallyVotesResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["governance", "admin"]) ?;
+    ensure_roles(&claims, &["governance", "admin"])?;
     Ok(Json(TallyVotesResponse {
         status: "success".to_string(),
         message: "Votes tallied successfully".to_string(),
@@ -748,7 +1329,7 @@ pub async fn execute_proposal(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<ExecuteProposalRequest>,
 ) -> Result<Json<ExecuteProposalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["governance", "admin"]) ?;
+    ensure_roles(&claims, &["governance", "admin"])?;
     Ok(Json(ExecuteProposalResponse {
         message: "Proposal executed successfully".to_string(),
     }))
@@ -770,7 +1351,7 @@ pub async fn delegate_vote(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(_request): Json<DelegateVoteRequest>,
 ) -> Result<Json<DelegateVoteResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     Ok(Json(DelegateVoteResponse {
         message: "Vote delegation set successfully".to_string(),
     }))
@@ -814,9 +1395,14 @@ pub async fn verify_impact(
     Json(req): Json<ImpactVerificationRequest>,
 ) -> Result<Json<ImpactVerificationResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize AI service from env
-    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let ai_config = env_ai_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let ai_service = AIService::new(ai_config);
-    
+
     // Convert handler request to core request
     let core_request = p_project_core::ImpactVerificationRequest {
         user_id: req.user_id,
@@ -825,7 +1411,7 @@ pub async fn verify_impact(
         evidence_urls: req.evidence_urls,
         impact_metrics: req.impact_metrics,
     };
-    
+
     match ai_service.verify_impact(core_request).await {
         Ok(response) => {
             // Convert core response to handler response
@@ -837,10 +1423,12 @@ pub async fn verify_impact(
                 recommendations: response.recommendations,
             };
             Ok(Json(handler_response))
-        },
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -865,9 +1453,14 @@ pub async fn generate_peace_nft_art(
     Json(req): Json<AINFTArtRequest>,
 ) -> Result<Json<AINFTArtResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize AI service from env
-    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let ai_config = env_ai_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let ai_service = AIService::new(ai_config);
-    
+
     // Convert handler request to core request
     let core_request = p_project_core::AINFTArtRequest {
         prompt: req.prompt,
@@ -875,7 +1468,7 @@ pub async fn generate_peace_nft_art(
         width: req.width,
         height: req.height,
     };
-    
+
     match ai_service.generate_peace_nft_art(core_request).await {
         Ok(response) => {
             // Convert core response to handler response
@@ -885,10 +1478,12 @@ pub async fn generate_peace_nft_art(
                 generation_time_ms: response.generation_time_ms,
             };
             Ok(Json(handler_response))
-        },
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -913,16 +1508,21 @@ pub async fn detect_fraud(
     Json(req): Json<FraudDetectionRequest>,
 ) -> Result<Json<FraudDetectionResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize AI service from env
-    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let ai_config = env_ai_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let ai_service = AIService::new(ai_config);
-    
+
     // Convert handler request to core request
     let core_request = p_project_core::FraudDetectionRequest {
         ngo_id: req.ngo_id,
         transaction_data: req.transaction_data,
         historical_patterns: req.historical_patterns,
     };
-    
+
     match ai_service.detect_fraud(core_request).await {
         Ok(response) => {
             // Convert core response to handler response
@@ -933,10 +1533,12 @@ pub async fn detect_fraud(
                 recommendations: response.recommendations,
             };
             Ok(Json(handler_response))
-        },
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -965,9 +1567,14 @@ pub async fn generate_ai_meme(
     Json(req): Json<AIMemeRequest>,
 ) -> Result<Json<AIMemeResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize AI service from env
-    let ai_config = env_ai_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let ai_config = env_ai_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let ai_service = AIService::new(ai_config);
-    
+
     // Convert handler request to core request
     let core_request = p_project_core::AIMemeRequest {
         prompt: req.prompt,
@@ -976,7 +1583,7 @@ pub async fn generate_ai_meme(
         height: req.height,
         template: req.template,
     };
-    
+
     match ai_service.generate_meme(core_request).await {
         Ok(response) => {
             // Convert core response to handler response
@@ -987,10 +1594,12 @@ pub async fn generate_ai_meme(
                 meme_text: response.meme_text,
             };
             Ok(Json(handler_response))
-        },
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1013,17 +1622,23 @@ pub async fn register_donation_box(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<RegisterDonationBoxRequest>,
 ) -> Result<Json<RegisterDonationBoxResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["admin"]) ?;
+    ensure_roles(&claims, &["admin"])?;
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut iot_service = IoTService::new(iot_config);
-    
+
     match iot_service.register_donation_box(req.box_id, req.location, req.wallet_address) {
         Ok(box_data) => Ok(Json(RegisterDonationBoxResponse { box_data })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1045,17 +1660,23 @@ pub async fn record_donation(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<RecordDonationRequest>,
 ) -> Result<Json<RecordDonationResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut iot_service = IoTService::new(iot_config);
-    
+
     match iot_service.record_donation(&req.box_id, req.amount, req.donor_address) {
         Ok(transaction) => Ok(Json(RecordDonationResponse { transaction })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1076,10 +1697,14 @@ pub async fn get_donation_box_status(
     Json(req): Json<GetDonationBoxStatusRequest>,
 ) -> Result<Json<GetDonationBoxStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let iot_service = IoTService::new(iot_config);
-    
+
     let box_data = iot_service.get_donation_box_status(&req.box_id).cloned();
     Ok(Json(GetDonationBoxStatusResponse { box_data }))
 }
@@ -1102,15 +1727,21 @@ pub async fn register_wristband(
     Json(req): Json<RegisterWristbandRequest>,
 ) -> Result<Json<RegisterWristbandResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut iot_service = IoTService::new(iot_config);
-    
+
     match iot_service.register_wristband(req.wristband_id, req.refugee_id, req.camp_id) {
         Ok(wristband_data) => Ok(Json(RegisterWristbandResponse { wristband_data })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1132,10 +1763,14 @@ pub async fn add_funds_to_wristband(
     Json(req): Json<AddFundsToWristbandRequest>,
 ) -> Result<Json<AddFundsToWristbandResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut iot_service = IoTService::new(iot_config);
-    
+
     match iot_service.add_funds_to_wristband(&req.wristband_id, req.amount) {
         Ok(()) => Ok(Json(AddFundsToWristbandResponse {
             success: true,
@@ -1143,7 +1778,9 @@ pub async fn add_funds_to_wristband(
         })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1166,15 +1803,26 @@ pub async fn process_wristband_transaction(
     Json(req): Json<ProcessWristbandTransactionRequest>,
 ) -> Result<Json<ProcessWristbandTransactionResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut iot_service = IoTService::new(iot_config);
-    
-    match iot_service.process_wristband_transaction(&req.wristband_id, req.amount, req.transaction_type, req.vendor_id) {
+
+    match iot_service.process_wristband_transaction(
+        &req.wristband_id,
+        req.amount,
+        req.transaction_type,
+        req.vendor_id,
+    ) {
         Ok(transaction) => Ok(Json(ProcessWristbandTransactionResponse { transaction })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1195,10 +1843,14 @@ pub async fn get_wristband_status(
     Json(req): Json<GetWristbandStatusRequest>,
 ) -> Result<Json<GetWristbandStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let iot_service = IoTService::new(iot_config);
-    
+
     let wristband_data = iot_service.get_wristband_status(&req.wristband_id).cloned();
     Ok(Json(GetWristbandStatusResponse { wristband_data }))
 }
@@ -1222,31 +1874,48 @@ pub async fn create_food_qr(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<CreateFoodQRRequest>,
 ) -> Result<Json<CreateFoodQRResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["admin"]) ?;
+    ensure_roles(&claims, &["admin"])?;
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut iot_service = IoTService::new(iot_config);
-    
+
     // Parse the expiration date
-    let expiration_date = match chrono::NaiveDateTime::parse_from_str(&req.expiration_date, "%Y-%m-%dT%H:%M:%S") {
-        Ok(date) => date,
-        Err(_) => match chrono::NaiveDateTime::parse_from_str(&req.expiration_date, "%Y-%m-%d %H:%M:%S") {
+    let expiration_date =
+        match chrono::NaiveDateTime::parse_from_str(&req.expiration_date, "%Y-%m-%dT%H:%M:%S") {
             Ok(date) => date,
-            Err(e) => {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse { error: format!("Invalid date format: {}", e) }),
-                ));
-            }
-        }
-    };
-    
-    match iot_service.create_food_qr(req.distribution_point, req.food_type, req.quantity, expiration_date) {
+            Err(_) => match chrono::NaiveDateTime::parse_from_str(
+                &req.expiration_date,
+                "%Y-%m-%d %H:%M:%S",
+            ) {
+                Ok(date) => date,
+                Err(e) => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: format!("Invalid date format: {}", e),
+                        }),
+                    ));
+                }
+            },
+        };
+
+    match iot_service.create_food_qr(
+        req.distribution_point,
+        req.food_type,
+        req.quantity,
+        expiration_date,
+    ) {
         Ok(qr_data) => Ok(Json(CreateFoodQRResponse { qr_data })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1268,23 +1937,29 @@ pub async fn claim_food_qr(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ClaimFoodQRRequest>,
 ) -> Result<Json<ClaimFoodQRResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut iot_service = IoTService::new(iot_config);
-    
+
     let claim_request = p_project_core::QRClaimRequest {
         qr_id: req.qr_id,
         recipient_id: req.recipient_id,
         recipient_nfc_id: req.recipient_nfc_id,
     };
-    
+
     match iot_service.claim_food_qr(claim_request) {
         Ok(response) => Ok(Json(ClaimFoodQRResponse { response })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1304,10 +1979,14 @@ pub async fn get_qr_status(
     Json(req): Json<GetQRStatusRequest>,
 ) -> Result<Json<GetQRStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize IoT service from env
-    let iot_config = env_iot_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let iot_config = env_iot_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let iot_service = IoTService::new(iot_config);
-    
+
     let qr_data = iot_service.get_qr_status(&req.qr_id).cloned();
     Ok(Json(GetQRStatusResponse { qr_data }))
 }
@@ -1328,17 +2007,23 @@ pub async fn create_donation_widget(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<CreateDonationWidgetRequest>,
 ) -> Result<Json<CreateDonationWidgetResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["admin"]) ?;
+    ensure_roles(&claims, &["admin"])?;
     // Initialize Web2 service from env
-    let web2_config = env_web2_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut web2_service = Web2Service::new(web2_config);
-    
+
     match web2_service.create_donation_widget(req.config) {
         Ok(widget_data) => Ok(Json(CreateDonationWidgetResponse { widget_data })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1358,17 +2043,28 @@ pub async fn process_social_media_donation(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ProcessSocialMediaDonationRequest>,
 ) -> Result<Json<ProcessSocialMediaDonationResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     // Initialize Web2 service from env
-    let web2_config = env_web2_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let web2_service = Web2Service::new(web2_config);
-    
-    match web2_service.process_social_media_donation(req.donation_data).await {
-        Ok(donation_response) => Ok(Json(ProcessSocialMediaDonationResponse { donation_response })),
+
+    match web2_service
+        .process_social_media_donation(req.donation_data)
+        .await
+    {
+        Ok(donation_response) => Ok(Json(ProcessSocialMediaDonationResponse {
+            donation_response,
+        })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1388,17 +2084,23 @@ pub async fn generate_widget_html(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<GenerateWidgetHtmlRequest>,
 ) -> Result<Json<GenerateWidgetHtmlResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     // Initialize Web2 service from env
-    let web2_config = env_web2_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let web2_service = Web2Service::new(web2_config);
-    
+
     match web2_service.generate_widget_html(&req.widget_id) {
         Ok(html) => Ok(Json(GenerateWidgetHtmlResponse { html })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1421,12 +2123,16 @@ pub async fn create_youtube_tip_config(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<CreateYouTubeTipConfigRequest>,
 ) -> Result<Json<CreateYouTubeTipConfigResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["admin"]) ?;
+    ensure_roles(&claims, &["admin"])?;
     // Initialize Web2 service from env
-    let web2_config = env_web2_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut web2_service = Web2Service::new(web2_config);
-    
+
     match web2_service.create_youtube_tip_config(req.config) {
         Ok(config_id) => Ok(Json(CreateYouTubeTipConfigResponse {
             config_id,
@@ -1435,7 +2141,9 @@ pub async fn create_youtube_tip_config(
         })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1455,17 +2163,23 @@ pub async fn process_youtube_tip(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ProcessYouTubeTipRequest>,
 ) -> Result<Json<ProcessYouTubeTipResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     // Initialize Web2 service from env
-    let web2_config = env_web2_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let web2_service = Web2Service::new(web2_config);
-    
+
     match web2_service.process_youtube_tip(req.tip_data).await {
         Ok(donation_response) => Ok(Json(ProcessYouTubeTipResponse { donation_response })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1488,12 +2202,16 @@ pub async fn register_messaging_bot(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<RegisterMessagingBotRequest>,
 ) -> Result<Json<RegisterMessagingBotResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["admin"]) ?;
+    ensure_roles(&claims, &["admin"])?;
     // Initialize Web2 service from env
-    let web2_config = env_web2_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let mut web2_service = Web2Service::new(web2_config);
-    
+
     match web2_service.register_messaging_bot(req.config) {
         Ok(bot_id) => Ok(Json(RegisterMessagingBotResponse {
             bot_id,
@@ -1502,7 +2220,9 @@ pub async fn register_messaging_bot(
         })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1522,19 +2242,390 @@ pub async fn process_bot_command(
     Extension(claims): Extension<crate::middleware::Claims>,
     Json(req): Json<ProcessBotCommandRequest>,
 ) -> Result<Json<ProcessBotCommandResponse>, (StatusCode, Json<ErrorResponse>)> {
-    ensure_roles(&claims, &["user", "admin"]) ?;
+    ensure_roles(&claims, &["user", "admin"])?;
     // Initialize Web2 service from env
-    let web2_config = env_web2_config()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e })))?;
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
     let web2_service = Web2Service::new(web2_config);
-    
+
     match web2_service.process_bot_command(req.command_data).await {
         Ok(command_response) => Ok(Json(ProcessBotCommandResponse { command_response })),
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterNgoRequest {
+    pub config: p_project_core::NGORegistration,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegisterNgoResponse {
+    pub ngo: p_project_core::NGOProfile,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddImpactEventRequest {
+    pub user_id: String,
+    pub event: p_project_core::SocialImpactEvent,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddImpactEventResponse {
+    pub credit_score: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RequestMicroLoanRequest {
+    pub borrower_id: String,
+    pub amount: f64,
+    pub collateral_amount: f64,
+    pub ngo_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RequestMicroLoanResponse {
+    pub loan: p_project_core::MicroLoan,
+    pub credit_score: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RepayMicroLoanRequest {
+    pub loan_id: String,
+    pub amount: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RepayMicroLoanResponse {
+    pub loan: p_project_core::MicroLoan,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetMicroLoanResponse {
+    pub loan: p_project_core::MicroLoan,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreditScoreResponse {
+    pub user_id: String,
+    pub credit_score: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TokenomicsSummaryResponse {
+    pub summary: p_project_core::TokenomicsSummary,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterMissionRequest {
+    pub mission: p_project_core::PeacefulMission,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegisterMissionResponse {
+    pub mission: p_project_core::PeacefulMission,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CompleteMissionRequest {
+    pub player_id: String,
+    pub mission_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CompleteMissionResponse {
+    pub receipt: p_project_core::RewardReceipt,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecordBehaviorRequest {
+    pub player_id: String,
+    pub behavior: p_project_core::PositiveBehavior,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RecordBehaviorResponse {
+    pub receipt: p_project_core::RewardReceipt,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PlayerBalanceResponse {
+    pub player_id: String,
+    pub balance: f64,
+}
+
+pub async fn register_ngo(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<RegisterNgoRequest>,
+) -> Result<Json<RegisterNgoResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["admin"])?;
+    let config = env_credit_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = CreditService::new(config);
+
+    let ngo = service.register_ngo(req.config);
+    Ok(Json(RegisterNgoResponse { ngo }))
+}
+
+pub async fn add_social_impact_event(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<AddImpactEventRequest>,
+) -> Result<Json<AddImpactEventResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_credit_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = CreditService::new(config);
+
+    match service.add_social_impact_event(&req.user_id, req.event) {
+        Ok(score) => Ok(Json(AddImpactEventResponse {
+            credit_score: score,
+        })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn request_micro_loan(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<RequestMicroLoanRequest>,
+) -> Result<Json<RequestMicroLoanResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_credit_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = CreditService::new(config);
+
+    match service.request_micro_loan(
+        &req.borrower_id,
+        req.amount,
+        req.collateral_amount,
+        &req.ngo_id,
+    ) {
+        Ok(loan) => {
+            let score = service.get_credit_score(&req.borrower_id);
+            Ok(Json(RequestMicroLoanResponse {
+                loan,
+                credit_score: score,
+            }))
+        }
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn repay_micro_loan(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<RepayMicroLoanRequest>,
+) -> Result<Json<RepayMicroLoanResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_credit_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = CreditService::new(config);
+
+    match service.repay_micro_loan(&req.loan_id, req.amount) {
+        Ok(loan) => Ok(Json(RepayMicroLoanResponse {
+            loan: loan.clone(),
+            status: format!("{:?}", loan.status),
+        })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn get_micro_loan(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Path(loan_id): Path<String>,
+) -> Result<Json<GetMicroLoanResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_credit_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let service = CreditService::new(config);
+
+    match service.get_micro_loan(&loan_id) {
+        Some(loan) => Ok(Json(GetMicroLoanResponse { loan: loan.clone() })),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "loan_not_found".to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn get_credit_score(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Path(user_id): Path<String>,
+) -> Result<Json<CreditScoreResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_credit_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = CreditService::new(config);
+
+    let score = service.get_credit_score(&user_id);
+    Ok(Json(CreditScoreResponse {
+        user_id,
+        credit_score: score,
+    }))
+}
+
+pub async fn get_tokenomics_summary(
+    State(_state): State<AppState>,
+) -> Result<Json<TokenomicsSummaryResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let path = env_tokenomics_path().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+
+    match TokenomicsService::from_path(path) {
+        Ok(service) => Ok(Json(TokenomicsSummaryResponse {
+            summary: service.summary().clone(),
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn register_mission(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<RegisterMissionRequest>,
+) -> Result<Json<RegisterMissionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["admin"])?;
+    let config = env_game_currency_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = GameCurrencyService::new(config);
+
+    match service.register_mission(req.mission) {
+        Ok(mission) => Ok(Json(RegisterMissionResponse { mission })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn complete_mission(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<CompleteMissionRequest>,
+) -> Result<Json<CompleteMissionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_game_currency_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = GameCurrencyService::new(config);
+
+    match service.complete_mission(&req.player_id, &req.mission_id) {
+        Ok(receipt) => Ok(Json(CompleteMissionResponse { receipt })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn record_behavior(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<RecordBehaviorRequest>,
+) -> Result<Json<RecordBehaviorResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_game_currency_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut service = GameCurrencyService::new(config);
+
+    let receipt = service.record_behavior(&req.player_id, req.behavior);
+    Ok(Json(RecordBehaviorResponse { receipt }))
+}
+
+pub async fn get_player_balance(
+    State(_state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Path(player_id): Path<String>,
+) -> Result<Json<PlayerBalanceResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    let config = env_game_currency_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let service = GameCurrencyService::new(config);
+
+    let balance = service.get_balance(&player_id);
+    Ok(Json(PlayerBalanceResponse { player_id, balance }))
 }
 
 #[derive(Debug, Serialize)]
@@ -1614,14 +2705,15 @@ pub async fn process_merchant_payment(
 ) -> Result<Json<MerchantPaymentResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Initialize merchant service
     let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
-        fee_percentage: 0.01, // 1% platform fee
+        fee_percentage: 0.01,            // 1% platform fee
         max_transaction_amount: 10000.0, // Max 10,000 P-Coin per transaction
     };
-    let mut merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
-    
+    let mut merchant_service =
+        p_project_core::merchant_service::MerchantService::new(merchant_config);
+
     // In a real implementation, we would load existing merchants from the database
     // For this example, we'll just process the payment directly
-    
+
     let core_request = p_project_core::merchant_service::MerchantPaymentRequest {
         merchant_id: req.merchant_id,
         customer_wallet: req.customer_wallet,
@@ -1630,7 +2722,7 @@ pub async fn process_merchant_payment(
         description: req.description,
         qr_code: req.qr_code,
     };
-    
+
     match merchant_service.process_payment(core_request).await {
         Ok(response) => {
             let handler_response = MerchantPaymentResponse {
@@ -1645,10 +2737,12 @@ pub async fn process_merchant_payment(
                 qr_code_used: response.qr_code_used,
             };
             Ok(Json(handler_response))
-        },
+        }
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1662,8 +2756,9 @@ pub async fn create_merchant(
         fee_percentage: 0.01,
         max_transaction_amount: 10000.0,
     };
-    let mut merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
-    
+    let mut merchant_service =
+        p_project_core::merchant_service::MerchantService::new(merchant_config);
+
     // Convert category string to enum
     let category = match req.category.as_str() {
         "coffee_shop" => p_project_core::merchant_service::MerchantCategory::CoffeeShop,
@@ -1673,7 +2768,7 @@ pub async fn create_merchant(
         "repair_shop" => p_project_core::merchant_service::MerchantCategory::RepairShop,
         _ => p_project_core::merchant_service::MerchantCategory::Other(req.category.clone()),
     };
-    
+
     match merchant_service.register_merchant(
         req.name,
         category,
@@ -1685,10 +2780,12 @@ pub async fn create_merchant(
         Ok(merchant_id) => {
             let response = CreateMerchantResponse { merchant_id };
             Ok(Json(response))
-        },
+        }
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1702,8 +2799,9 @@ pub async fn create_payment_qr(
         fee_percentage: 0.01,
         max_transaction_amount: 10000.0,
     };
-    let mut merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
-    
+    let mut merchant_service =
+        p_project_core::merchant_service::MerchantService::new(merchant_config);
+
     match merchant_service.create_payment_qr(
         req.merchant_id,
         req.amount,
@@ -1714,10 +2812,12 @@ pub async fn create_payment_qr(
         Ok(qr_id) => {
             let response = CreateQRResponse { qr_id };
             Ok(Json(response))
-        },
+        }
         Err(e) => Err((
             StatusCode::BAD_REQUEST,
-            Json(ErrorResponse { error: e.to_string() }),
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
         )),
     }
 }
@@ -1732,10 +2832,10 @@ pub async fn get_merchant(
         max_transaction_amount: 10000.0,
     };
     let merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
-    
+
     // In a real implementation, we would fetch the merchant from the database
     // For this example, we'll return a mock response
-    
+
     // This is a simplified implementation - in reality, you would look up the merchant
     let response = GetMerchantResponse {
         id: merchant_id,
@@ -1749,6 +2849,6 @@ pub async fn get_merchant(
         created_at: Utc::now().naive_utc(),
         verified_at: Some(Utc::now().naive_utc()),
     };
-    
+
     Ok(Json(response))
 }

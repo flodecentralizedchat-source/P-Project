@@ -1,5 +1,5 @@
-use p_project_core::database::MySqlDatabase;
 use crate::ratelimit::RateLimiter;
+use p_project_core::database::MySqlDatabase;
 use std::sync::Arc;
 
 #[derive(Clone)]

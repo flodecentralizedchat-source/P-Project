@@ -312,7 +312,11 @@ impl MySqlDatabase {
         Ok(())
     }
 
-    pub async fn claim_airdrop(&self, airdrop_id: &str, user_id: &str) -> Result<Decimal, sqlx::Error> {
+    pub async fn claim_airdrop(
+        &self,
+        airdrop_id: &str,
+        user_id: &str,
+    ) -> Result<Decimal, sqlx::Error> {
         // Get the amount to claim
         let row = sqlx::query(
             r#"SELECT amount FROM airdrop_recipients WHERE airdrop_id = ? AND user_id = ? AND claimed = FALSE"#
@@ -379,7 +383,12 @@ impl MySqlDatabase {
         let total_recipients: i64 = recipient_row.get("total_recipients");
         let claimed_recipients: Option<i64> = recipient_row.get("claimed_recipients");
 
-        Ok((total_amount, distributed_amount, total_recipients as usize, claimed_recipients.unwrap_or(0) as usize))
+        Ok((
+            total_amount,
+            distributed_amount,
+            total_recipients as usize,
+            claimed_recipients.unwrap_or(0) as usize,
+        ))
     }
 
     pub async fn batch_claim_airdrops(
@@ -513,7 +522,10 @@ impl MySqlDatabase {
         }
     }
 
-    pub async fn get_balances(&self, user_id: &str) -> Result<Option<(Decimal, Decimal)>, sqlx::Error> {
+    pub async fn get_balances(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<(Decimal, Decimal)>, sqlx::Error> {
         if let Some(row) =
             sqlx::query("SELECT available_balance, staked_balance FROM balances WHERE user_id = ?")
                 .bind(user_id)
@@ -545,13 +557,12 @@ impl MySqlDatabase {
         let mut tx = self.pool.begin().await.map_err(BalanceError::Sql)?;
 
         // Check if from_user exists and has sufficient balance
-        let from_balance_row = sqlx::query(
-            "SELECT available_balance FROM balances WHERE user_id = ? FOR UPDATE"
-        )
-        .bind(from_user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(BalanceError::Sql)?;
+        let from_balance_row =
+            sqlx::query("SELECT available_balance FROM balances WHERE user_id = ? FOR UPDATE")
+                .bind(from_user_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(BalanceError::Sql)?;
 
         let from_balance: Decimal = match from_balance_row {
             Some(row) => row.get::<Decimal, _>("available_balance"),
@@ -576,7 +587,7 @@ impl MySqlDatabase {
 
         // Update balances
         sqlx::query(
-            "UPDATE balances SET available_balance = available_balance - ? WHERE user_id = ?"
+            "UPDATE balances SET available_balance = available_balance - ? WHERE user_id = ?",
         )
         .bind(amount)
         .bind(from_user_id)
@@ -585,7 +596,7 @@ impl MySqlDatabase {
         .map_err(BalanceError::Sql)?;
 
         sqlx::query(
-            "UPDATE balances SET available_balance = available_balance + ? WHERE user_id = ?"
+            "UPDATE balances SET available_balance = available_balance + ? WHERE user_id = ?",
         )
         .bind(amount)
         .bind(to_user_id)
@@ -635,13 +646,12 @@ impl MySqlDatabase {
         let mut tx = self.pool.begin().await.map_err(BalanceError::Sql)?;
 
         // Check if user exists and has sufficient balance
-        let user_balance_row = sqlx::query(
-            "SELECT available_balance FROM balances WHERE user_id = ? FOR UPDATE"
-        )
-        .bind(user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(BalanceError::Sql)?;
+        let user_balance_row =
+            sqlx::query("SELECT available_balance FROM balances WHERE user_id = ? FOR UPDATE")
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(BalanceError::Sql)?;
 
         let available_balance: Decimal = match user_balance_row {
             Some(row) => row.get::<Decimal, _>("available_balance"),
@@ -757,14 +767,12 @@ impl MySqlDatabase {
 
         // Update stake record
         let end_time_now = Utc::now().naive_utc();
-        sqlx::query(
-            "UPDATE stakes SET status = 'completed', end_time = ? WHERE id = ?"
-        )
-        .bind(end_time_now)
-        .bind(stake_id_val)
-        .execute(&mut *tx)
-        .await
-        .map_err(BalanceError::Sql)?;
+        sqlx::query("UPDATE stakes SET status = 'completed', end_time = ? WHERE id = ?")
+            .bind(end_time_now)
+            .bind(stake_id_val)
+            .execute(&mut *tx)
+            .await
+            .map_err(BalanceError::Sql)?;
 
         // Commit transaction
         tx.commit().await.map_err(BalanceError::Sql)?;

@@ -1,13 +1,13 @@
 //! Web2 integration service module for P-Project
-//! 
+//!
 //! This module provides Web2 integration features including:
 //! - Social media donation widgets (Facebook, Instagram)
 //! - YouTube tip integration
 //! - Telegram/Discord tip bots
 
+use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{NaiveDateTime, Utc};
 
 /// Web2 service configuration
 #[derive(Debug, Clone)]
@@ -110,6 +110,60 @@ pub struct BotCommandResponse {
     pub tip_transaction_id: Option<String>,
 }
 
+/// E-commerce platform configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcommerceConfig {
+    pub platform: String, // "shopify" or "woocommerce"
+    pub api_key: String,
+    pub api_secret: String,
+    pub store_url: String,
+    pub webhook_secret: Option<String>,
+}
+
+/// E-commerce order data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcommerceOrder {
+    pub order_id: String,
+    pub customer_email: String,
+    pub items: Vec<EcommerceItem>,
+    pub total_amount: f64,
+    pub currency: String,
+    pub status: String,
+}
+
+/// E-commerce item in an order
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcommerceItem {
+    pub product_id: String,
+    pub name: String,
+    pub quantity: u32,
+    pub price: f64,
+}
+
+/// E-commerce payment request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcommercePaymentRequest {
+    pub order_id: String,
+    pub customer_wallet: String,
+    pub amount: f64,
+    pub currency: String,                        // Should be "P" for P-Coin
+    pub platform: String,                        // "shopify" or "woocommerce"
+    pub webhook_data: Option<serde_json::Value>, // Raw webhook data for verification
+}
+
+/// E-commerce payment response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcommercePaymentResponse {
+    pub order_id: String,
+    pub transaction_id: String,
+    pub customer_wallet: String,
+    pub amount: f64,
+    pub currency: String,
+    pub status: String, // "success", "failed", "pending"
+    pub timestamp: NaiveDateTime,
+    pub tx_hash: Option<String>, // Blockchain transaction hash
+}
+
 /// Web2 Service for P-Project
 pub struct Web2Service {
     config: Web2ServiceConfig,
@@ -130,16 +184,19 @@ impl Web2Service {
     }
 
     /// Create a new social media donation widget
-    pub fn create_donation_widget(&mut self, config: SocialMediaWidgetConfig) -> Result<DonationWidgetData, Box<dyn std::error::Error>> {
+    pub fn create_donation_widget(
+        &mut self,
+        config: SocialMediaWidgetConfig,
+    ) -> Result<DonationWidgetData, Box<dyn std::error::Error>> {
         let widget_id = format!("widget_{}", uuid::Uuid::new_v4());
-        
+
         let widget_data = DonationWidgetData {
             widget_id: widget_id.clone(),
             config,
             created_at: Utc::now().naive_utc(),
             is_active: true,
         };
-        
+
         self.donation_widgets.insert(widget_id, widget_data.clone());
         Ok(widget_data)
     }
@@ -150,30 +207,36 @@ impl Web2Service {
     }
 
     /// Process a social media donation
-    pub async fn process_social_media_donation(&self, request: SocialMediaDonationRequest) -> Result<DonationResponse, Box<dyn std::error::Error>> {
+    pub async fn process_social_media_donation(
+        &self,
+        request: SocialMediaDonationRequest,
+    ) -> Result<DonationResponse, Box<dyn std::error::Error>> {
         // In a real implementation, this would:
         // 1. Validate the request
         // 2. Process payment through a payment gateway
         // 3. Transfer tokens to the recipient
         // 4. Record the transaction
-        
+
         let donation_id = format!("donation_{}", uuid::Uuid::new_v4());
-        
+
         // Simulate processing
         let success = request.amount > 0.0;
         let message = if success {
-            format!("Successfully processed donation of {} {}", request.amount, request.currency)
+            format!(
+                "Successfully processed donation of {} {}",
+                request.amount, request.currency
+            )
         } else {
             "Invalid donation amount".to_string()
         };
-        
+
         // Simulate transaction hash
         let transaction_hash = if success {
             Some(format!("0x{}", uuid::Uuid::new_v4()))
         } else {
             None
         };
-        
+
         Ok(DonationResponse {
             donation_id,
             success,
@@ -183,37 +246,46 @@ impl Web2Service {
     }
 
     /// Create YouTube tip configuration
-    pub fn create_youtube_tip_config(&mut self, config: YouTubeTipConfig) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn create_youtube_tip_config(
+        &mut self,
+        config: YouTubeTipConfig,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let config_id = format!("yt_{}", uuid::Uuid::new_v4());
         self.youtube_configs.insert(config_id.clone(), config);
         Ok(config_id)
     }
 
     /// Process YouTube tip
-    pub async fn process_youtube_tip(&self, request: YouTubeTipRequest) -> Result<DonationResponse, Box<dyn std::error::Error>> {
+    pub async fn process_youtube_tip(
+        &self,
+        request: YouTubeTipRequest,
+    ) -> Result<DonationResponse, Box<dyn std::error::Error>> {
         // In a real implementation, this would:
         // 1. Validate the request
         // 2. Process payment through YouTube's tipping system or a payment gateway
         // 3. Transfer tokens to the creator
         // 4. Record the transaction
-        
+
         let donation_id = format!("tip_{}", uuid::Uuid::new_v4());
-        
+
         // Simulate processing
         let success = request.amount > 0.0;
         let message = if success {
-            format!("Successfully processed tip of {} {} to YouTube channel {}", request.amount, request.currency, request.channel_id)
+            format!(
+                "Successfully processed tip of {} {} to YouTube channel {}",
+                request.amount, request.currency, request.channel_id
+            )
         } else {
             "Invalid tip amount".to_string()
         };
-        
+
         // Simulate transaction hash
         let transaction_hash = if success {
             Some(format!("0x{}", uuid::Uuid::new_v4()))
         } else {
             None
         };
-        
+
         Ok(DonationResponse {
             donation_id,
             success,
@@ -223,35 +295,44 @@ impl Web2Service {
     }
 
     /// Register a messaging bot
-    pub fn register_messaging_bot(&mut self, config: MessagingBotConfig) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn register_messaging_bot(
+        &mut self,
+        config: MessagingBotConfig,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let bot_id = format!("bot_{}", config.platform);
         self.bot_configs.insert(bot_id.clone(), config);
         Ok(bot_id)
     }
 
     /// Process bot command
-    pub async fn process_bot_command(&self, request: BotCommandRequest) -> Result<BotCommandResponse, Box<dyn std::error::Error>> {
+    pub async fn process_bot_command(
+        &self,
+        request: BotCommandRequest,
+    ) -> Result<BotCommandResponse, Box<dyn std::error::Error>> {
         // In a real implementation, this would:
         // 1. Validate the command
         // 2. Execute the appropriate action
         // 3. Send response back to the chat
-        
+
         let success = match request.command.as_str() {
             "tip" | "donate" => true,
             "help" => true,
             "balance" => true,
             _ => false,
         };
-        
+
         let response_text = if success {
             match request.command.as_str() {
                 "tip" | "donate" => {
                     if !request.args.is_empty() {
-                        format!("Processing tip of {} P-Coin to user {}", request.args[0], request.user_id)
+                        format!(
+                            "Processing tip of {} P-Coin to user {}",
+                            request.args[0], request.user_id
+                        )
                     } else {
                         "Please specify an amount to tip".to_string()
                     }
-                },
+                }
                 "help" => "Available commands: tip <amount>, balance, help".to_string(),
                 "balance" => "Your balance: 100 P-Coin".to_string(),
                 _ => "Command processed successfully".to_string(),
@@ -259,14 +340,14 @@ impl Web2Service {
         } else {
             format!("Unknown command: {}", request.command)
         };
-        
+
         // Simulate tip transaction ID
         let tip_transaction_id = if request.command == "tip" || request.command == "donate" {
             Some(format!("tx_{}", uuid::Uuid::new_v4()))
         } else {
             None
         };
-        
+
         Ok(BotCommandResponse {
             success,
             response_text,
@@ -274,15 +355,150 @@ impl Web2Service {
         })
     }
 
+    /// Create e-commerce integration for Shopify or WooCommerce
+    pub fn create_ecommerce_integration(
+        &mut self,
+        config: EcommerceConfig,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let integration_id = format!("ecom_{}", uuid::Uuid::new_v4());
+
+        // In a real implementation, we would:
+        // 1. Validate API credentials with the e-commerce platform
+        // 2. Register webhooks for order events
+        // 3. Store the configuration for later use
+
+        // For now, we'll just store it in memory
+        // In a real implementation, this would be stored in a database
+
+        Ok(integration_id)
+    }
+
+    /// Process e-commerce payment
+    pub async fn process_ecommerce_payment(
+        &self,
+        request: EcommercePaymentRequest,
+    ) -> Result<EcommercePaymentResponse, Box<dyn std::error::Error>> {
+        // In a real implementation, this would:
+        // 1. Verify the webhook data if provided
+        // 2. Validate the order with the e-commerce platform
+        // 3. Process payment through a payment gateway
+        // 4. Transfer tokens to the merchant
+        // 5. Record the transaction
+
+        let transaction_id = format!("tx_{}", uuid::Uuid::new_v4());
+
+        // Simulate processing
+        let success = request.amount > 0.0 && request.currency == "P";
+        let status = if success { "success" } else { "failed" };
+
+        // Simulate transaction hash
+        let tx_hash = if success {
+            Some(format!("0x{}", uuid::Uuid::new_v4()))
+        } else {
+            None
+        };
+
+        Ok(EcommercePaymentResponse {
+            order_id: request.order_id,
+            transaction_id,
+            customer_wallet: request.customer_wallet,
+            amount: request.amount,
+            currency: request.currency,
+            status: status.to_string(),
+            timestamp: Utc::now().naive_utc(),
+            tx_hash,
+        })
+    }
+
+    /// Verify webhook signature for Shopify
+    pub fn verify_shopify_webhook(&self, body: &[u8], signature: &str, secret: &str) -> bool {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        type HmacSha256 = Hmac<Sha256>;
+
+        let mut mac =
+            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+        mac.update(body);
+
+        match hex::decode(signature) {
+            Ok(signature_bytes) => mac.verify_slice(&signature_bytes).is_ok(),
+            Err(_) => false,
+        }
+    }
+
+    /// Verify webhook signature for WooCommerce
+    pub fn verify_woocommerce_webhook(&self, body: &[u8], signature: &str, secret: &str) -> bool {
+        // WooCommerce uses a simple hash comparison
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        type HmacSha256 = Hmac<Sha256>;
+
+        let mut mac =
+            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+        mac.update(body);
+
+        match hex::decode(signature) {
+            Ok(signature_bytes) => mac.verify_slice(&signature_bytes).is_ok(),
+            Err(_) => false,
+        }
+    }
+
+    /// Handle Shopify webhook
+    pub async fn handle_shopify_webhook(
+        &self,
+        _body: &[u8],
+        _signature: &str,
+        _topic: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        // In a real implementation, we would:
+        // 1. Find the appropriate Shopify config by store URL
+        // 2. Verify the webhook signature
+        // 3. Parse and process the webhook data
+
+        // For now, we'll just return a success response
+        Ok(serde_json::json!({
+            "status": "success",
+            "message": format!("Webhook {} processed", _topic),
+            "timestamp": Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Handle WooCommerce webhook
+    pub async fn handle_woocommerce_webhook(
+        &self,
+        _body: &[u8],
+        _signature: &str,
+        _topic: &str,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        // In a real implementation, we would:
+        // 1. Find the appropriate WooCommerce config by store URL
+        // 2. Verify the webhook signature
+        // 3. Parse and process the webhook data
+
+        // For now, we'll just return a success response
+        Ok(serde_json::json!({
+            "status": "success",
+            "message": format!("Webhook {} processed", _topic),
+            "timestamp": Utc::now().to_rfc3339()
+        }))
+    }
+
     /// Generate HTML widget code for social media integration
-    pub fn generate_widget_html(&self, widget_id: &str) -> Result<String, Box<dyn std::error::Error>> {
-        let widget = self.donation_widgets.get(widget_id)
+    pub fn generate_widget_html(
+        &self,
+        widget_id: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let widget = self
+            .donation_widgets
+            .get(widget_id)
             .ok_or("Widget not found")?;
-        
+
         if !widget.is_active {
             return Err("Widget is not active".into());
         }
-        
+
         let html = format!(
             r#"<div class="p-coin-donation-widget" data-widget-id="{}">
   <h3>{}</h3>
@@ -324,7 +540,7 @@ impl Web2Service {
             widget.config.currency,
             widget.config.currency
         );
-        
+
         Ok(html)
     }
 }
@@ -332,18 +548,19 @@ impl Web2Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_web2_service_creation() {
         let mut api_keys = HashMap::new();
         api_keys.insert("facebook".to_string(), "fb_key".to_string());
         api_keys.insert("youtube".to_string(), "yt_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let service = Web2Service::new(config);
         assert!(service.donation_widgets.is_empty());
         assert!(service.youtube_configs.is_empty());
@@ -354,14 +571,14 @@ mod tests {
     fn test_donation_widget_creation() {
         let mut api_keys = HashMap::new();
         api_keys.insert("facebook".to_string(), "fb_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let mut service = Web2Service::new(config);
-        
+
         let widget_config = SocialMediaWidgetConfig {
             platform: "facebook".to_string(),
             page_id: "page123".to_string(),
@@ -372,10 +589,10 @@ mod tests {
             button_text: "Donate Now".to_string(),
             description: "Help us provide education to children in need".to_string(),
         };
-        
+
         let result = service.create_donation_widget(widget_config);
         assert!(result.is_ok());
-        
+
         let widget_data = result.unwrap();
         assert!(widget_data.widget_id.starts_with("widget_"));
         assert_eq!(widget_data.config.campaign_name, "Save the Children");
@@ -386,14 +603,14 @@ mod tests {
     async fn test_social_media_donation() {
         let mut api_keys = HashMap::new();
         api_keys.insert("facebook".to_string(), "fb_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let service = Web2Service::new(config);
-        
+
         let donation_request = SocialMediaDonationRequest {
             widget_id: "widget123".to_string(),
             donor_name: "John Doe".to_string(),
@@ -404,10 +621,12 @@ mod tests {
             platform_user_id: "user456".to_string(),
             message: Some("Great cause!".to_string()),
         };
-        
-        let result = service.process_social_media_donation(donation_request).await;
+
+        let result = service
+            .process_social_media_donation(donation_request)
+            .await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         assert!(response.success);
         assert!(response.donation_id.starts_with("donation_"));
@@ -418,14 +637,14 @@ mod tests {
     fn test_youtube_tip_config() {
         let mut api_keys = HashMap::new();
         api_keys.insert("youtube".to_string(), "yt_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let mut service = Web2Service::new(config);
-        
+
         let tip_config = YouTubeTipConfig {
             channel_id: "channel123".to_string(),
             video_id: Some("video456".to_string()),
@@ -433,10 +652,10 @@ mod tests {
             currency: "P".to_string(),
             message: "Thanks for supporting our content!".to_string(),
         };
-        
+
         let result = service.create_youtube_tip_config(tip_config);
         assert!(result.is_ok());
-        
+
         let config_id = result.unwrap();
         assert!(config_id.starts_with("yt_"));
     }
@@ -445,14 +664,14 @@ mod tests {
     async fn test_youtube_tip() {
         let mut api_keys = HashMap::new();
         api_keys.insert("youtube".to_string(), "yt_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let service = Web2Service::new(config);
-        
+
         let tip_request = YouTubeTipRequest {
             channel_id: "channel123".to_string(),
             video_id: Some("video456".to_string()),
@@ -462,10 +681,10 @@ mod tests {
             currency: "P".to_string(),
             message: Some("Love your content!".to_string()),
         };
-        
+
         let result = service.process_youtube_tip(tip_request).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         assert!(response.success);
         assert!(response.donation_id.starts_with("tip_"));
@@ -477,14 +696,14 @@ mod tests {
         let mut api_keys = HashMap::new();
         api_keys.insert("telegram".to_string(), "tg_key".to_string());
         api_keys.insert("discord".to_string(), "dc_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let mut service = Web2Service::new(config);
-        
+
         let bot_config = MessagingBotConfig {
             platform: "telegram".to_string(),
             bot_token: "bot_token_123".to_string(),
@@ -492,10 +711,10 @@ mod tests {
             default_tip_amount: 5.0,
             currency: "P".to_string(),
         };
-        
+
         let result = service.register_messaging_bot(bot_config);
         assert!(result.is_ok());
-        
+
         let bot_id = result.unwrap();
         assert_eq!(bot_id, "bot_telegram");
     }
@@ -504,14 +723,14 @@ mod tests {
     async fn test_bot_command() {
         let mut api_keys = HashMap::new();
         api_keys.insert("telegram".to_string(), "tg_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let service = Web2Service::new(config);
-        
+
         let command_request = BotCommandRequest {
             platform: "telegram".to_string(),
             chat_id: "chat123".to_string(),
@@ -519,10 +738,10 @@ mod tests {
             command: "tip".to_string(),
             args: vec!["10".to_string()],
         };
-        
+
         let result = service.process_bot_command(command_request).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         assert!(response.success);
         assert!(response.response_text.contains("Processing tip"));
@@ -533,14 +752,14 @@ mod tests {
     fn test_widget_html_generation() {
         let mut api_keys = HashMap::new();
         api_keys.insert("facebook".to_string(), "fb_key".to_string());
-        
+
         let config = Web2ServiceConfig {
             api_keys,
             webhook_url: "https://api.example.com/webhook".to_string(),
         };
-        
+
         let mut service = Web2Service::new(config);
-        
+
         let widget_config = SocialMediaWidgetConfig {
             platform: "facebook".to_string(),
             page_id: "page123".to_string(),
@@ -551,12 +770,12 @@ mod tests {
             button_text: "Donate Now".to_string(),
             description: "Help us provide education to children in need".to_string(),
         };
-        
+
         let widget_data = service.create_donation_widget(widget_config).unwrap();
-        
+
         let result = service.generate_widget_html(&widget_data.widget_id);
         assert!(result.is_ok());
-        
+
         let html = result.unwrap();
         assert!(html.contains("p-coin-donation-widget"));
         assert!(html.contains("Save the Children"));

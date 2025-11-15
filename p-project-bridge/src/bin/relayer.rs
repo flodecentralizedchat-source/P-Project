@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use p_project_core::database::MySqlDatabase;
 use p_project_bridge::BridgeService;
+use p_project_core::database::MySqlDatabase;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -36,7 +36,7 @@ impl IPFSClient {
         // 1. Serialize the metadata to JSON
         // 2. Upload it to IPFS
         // 3. Return the CID
-        
+
         // For simulation purposes, we'll just return a mock CID
         Ok("QmTest1234567890".to_string())
     }
@@ -46,19 +46,17 @@ impl IPFSClient {
         // In a real implementation, this would:
         // 1. Fetch the data from IPFS using the CID
         // 2. Deserialize it into IPFSMetadata
-        
+
         // For simulation purposes, we'll return mock data
         Ok(IPFSMetadata {
             name: "Test NFT".to_string(),
             description: "A test NFT from P-Project".to_string(),
             image: format!("ipfs://{}", cid),
-            attributes: vec![
-                MetadataAttribute {
-                    trait_type: "Rarity".to_string(),
-                    value: "Common".to_string(),
-                    display_type: None,
-                }
-            ],
+            attributes: vec![MetadataAttribute {
+                trait_type: "Rarity".to_string(),
+                value: "Common".to_string(),
+                display_type: None,
+            }],
             external_url: Some("https://p-project.io".to_string()),
             animation_url: None,
             background_color: None,

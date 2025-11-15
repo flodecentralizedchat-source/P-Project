@@ -1,0 +1,88 @@
+    /// Sponsor a peace-builder profile.
+    pub fn sponsor_peace_builder(
+        &mut self,
+        request: SponsorshipRequest,
+    ) -> Result<SponsorshipTransaction, Box<dyn std::error::Error>> {
+        self.ensure_currency(&request.currency)?;
+        self.ensure_amount(request.amount)?;
+
+        // Check if builder exists and is active
+        {
+            let builder = self
+                .builders
+                .get(&request.target_id)
+                .ok_or("Peace-builder profile not found")?;
+
+            if !builder.is_active {
+                return Err("Peace-builder is not accepting sponsorships".into());
+            }
+        }
+
+        // Get mutable reference to builder and update it
+        let builder = self
+            .builders
+            .get_mut(&request.target_id)
+            .unwrap(); // Safe because we already checked it exists
+
+        let remaining = builder.required_amount - builder.funded_amount;
+        let applied_amount = self.apply_sponsorship(request.amount, remaining)?;
+
+        builder.funded_amount += applied_amount;
+        builder.sponsor_count += 1;
+        builder.updated_at = self.now();
+        if builder.funded_amount >= builder.required_amount {
+            builder.is_active = false;
+        }
+
+        Ok(self.record_transaction(
+            request.sponsor_id,
+            request.target_id,
+            SponsorshipTargetType::PeaceBuilder,
+            applied_amount,
+            request.message,
+        ))
+    }
+
+    /// Fund a peace education program.
+    pub fn fund_program(
+        &mut self,
+        request: SponsorshipRequest,
+    ) -> Result<SponsorshipTransaction, Box<dyn std::error::Error>> {
+        self.ensure_currency(&request.currency)?;
+        self.ensure_amount(request.amount)?;
+
+        // Check if program exists and is active
+        {
+            let program = self
+                .programs
+                .get(&request.target_id)
+                .ok_or("Program not found")?;
+
+            if !program.is_active {
+                return Err("Program is not accepting funds".into());
+            }
+        }
+
+        // Get mutable reference to program and update it
+        let program = self
+            .programs
+            .get_mut(&request.target_id)
+            .unwrap(); // Safe because we already checked it exists
+
+        let remaining = program.funding_goal - program.funds_received;
+        let applied_amount = self.apply_sponsorship(request.amount, remaining)?;
+
+        program.funds_received += applied_amount;
+        program.updated_at = self.now();
+        if program.funds_received >= program.funding_goal {
+            program.is_active = false;
+        }
+
+        Ok(self.record_transaction(
+            request.sponsor_id,
+            request.target_id,
+            SponsorshipTargetType::EducationProgram,
+            applied_amount,
+            request.message,
+        ))
+    }

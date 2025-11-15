@@ -1,6 +1,8 @@
 use chrono::{NaiveDateTime, Utc};
 use p_project_core::models::{TokenTransaction, TransactionType};
 use p_project_core::utils::generate_id;
+use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -497,7 +499,7 @@ impl PProjectToken {
             id: generate_id(),
             from_user_id: from_user_id.to_string(),
             to_user_id: to_user_id.to_string(),
-            amount,
+            amount: Decimal::try_from(amount).unwrap_or(Decimal::ZERO),
             transaction_type: TransactionType::Transfer,
             timestamp: Utc::now().naive_utc(),
         };

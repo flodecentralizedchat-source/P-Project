@@ -1,5 +1,7 @@
 use p_project_contracts::airdrop::{AirdropContract, AirdropStatus};
 use p_project_core::database::MySqlDatabase;
+use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 
 pub struct AirdropService {
     airdrop_contract: AirdropContract,
@@ -10,7 +12,8 @@ impl AirdropService {
     pub async fn new(airdrop_contract: AirdropContract, db: MySqlDatabase) -> Result<Self, String> {
         // Save the airdrop to the database
         let airdrop_id = airdrop_contract.get_airdrop_id();
-        let total_amount = airdrop_contract.get_status().total_amount;
+        let total_amount = Decimal::from_f64(airdrop_contract.get_status().total_amount)
+            .ok_or("Failed to convert total amount to Decimal")?;
         let start_time = airdrop_contract.get_start_time();
         let end_time = airdrop_contract.get_end_time();
 
@@ -44,11 +47,19 @@ impl AirdropService {
         };
 
         if result.is_ok() {
+            // Convert f64 amounts to Decimal for database
+            let mut decimal_recipients = Vec::new();
+            for (user_id, amount) in recipients {
+                let decimal_amount = Decimal::from_f64(amount)
+                    .ok_or_else(|| "Failed to convert amount to Decimal".to_string())?;
+                decimal_recipients.push((user_id, decimal_amount));
+            }
+
             // Save to database
             let airdrop_id = self.airdrop_contract.get_airdrop_id();
             let category_str = category.as_deref();
             self.db
-                .add_airdrop_recipients(airdrop_id, &recipients, category_str)
+                .add_airdrop_recipients(airdrop_id, &decimal_recipients, category_str)
                 .await
                 .map_err(|e| format!("Failed to add recipients to database: {}", e))?;
         }
@@ -64,13 +75,17 @@ impl AirdropService {
         if result.is_ok() {
             // Save to database
             let airdrop_id = self.airdrop_contract.get_airdrop_id();
-            self.db
+            let claimed_amount = self
+                .db
                 .claim_airdrop(airdrop_id, user_id)
                 .await
                 .map_err(|e| format!("Failed to claim airdrop in database: {}", e))?;
-        }
 
-        result.map_err(|e| e.to_string())
+            // Convert Decimal back to f64 for the contract
+            Ok(claimed_amount.to_f64().unwrap_or(0.0))
+        } else {
+            result.map_err(|e| e.to_string())
+        }
     }
 
     /// Batch claim airdrops for multiple users
@@ -84,13 +99,22 @@ impl AirdropService {
         if result.is_ok() {
             // Save to database
             let airdrop_id = self.airdrop_contract.get_airdrop_id();
-            self.db
+            let claimed_amounts = self
+                .db
                 .batch_claim_airdrops(airdrop_id, &user_ids)
                 .await
                 .map_err(|e| format!("Failed to batch claim airdrops in database: {}", e))?;
-        }
 
-        result.map_err(|e| e.to_string())
+            // Convert Decimal amounts back to f64 for the contract
+            let converted_amounts: Vec<(String, f64)> = claimed_amounts
+                .into_iter()
+                .map(|(user_id, amount)| (user_id, amount.to_f64().unwrap_or(0.0)))
+                .collect();
+
+            Ok(converted_amounts)
+        } else {
+            result.map_err(|e| e.to_string())
+        }
     }
 
     /// Check if user has claimed their airdrop
@@ -115,8 +139,8 @@ impl AirdropService {
 
         Ok(AirdropStatus {
             airdrop_id: airdrop_id.to_string(),
-            total_amount,
-            distributed_amount,
+            total_amount: total_amount.to_f64().unwrap_or(0.0),
+            distributed_amount: distributed_amount.to_f64().unwrap_or(0.0),
             total_recipients,
             claimed_recipients,
             is_paused: self.airdrop_contract.is_paused(),
