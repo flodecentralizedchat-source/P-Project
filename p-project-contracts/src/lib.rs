@@ -1,9 +1,14 @@
 pub mod advanced_cryptography; // Add the new advanced cryptography module
 pub mod advanced_verification; // Add the new advanced verification module
 pub mod airdrop;
+pub mod audit_registry; // Audit metadata registry
 pub mod charity; // Add the new charity allocator module
+pub mod community_liquidity; // Community liquidity incentives
+pub mod compliance; // Compliance and regulatory controls
 pub mod comprehensive_test_suite; // Add the new comprehensive test suite module
 pub mod comprehensive_verification; // Add the new comprehensive verification module
+pub mod cross_chain_liquidity; // Cross-chain liquidity orchestration
+pub mod dex_listing; // DEX listing orchestration helpers
 pub mod formal_verification; // Add the new formal verification module
 pub mod l2_batching; // Add the new L2 batching module
 pub mod l2_cross_chain; // Add the new L2 cross-chain module
@@ -14,15 +19,17 @@ pub mod liquidity_pool; // Add the new liquidity pool module
 pub mod load_testing;
 pub mod metaverse;
 pub mod nft; // Add the new NFT module
+pub mod ownership;
 pub mod price_simulation; // Add the new price simulation module
 pub mod savings_vault;
+pub mod security_compliance; // Additional security controls
 pub mod stable_liquidity_pool; // Add the new stable liquidity pool module
 pub mod staking;
 pub mod supply_chain;
 pub mod theorem_proving; // Add the new theorem proving module
 pub mod token;
 pub mod treasury;
-pub mod vesting; // Add the new load testing module
+pub mod vesting; // Add the new load testing module // Ownable + renounce mechanics
 
 // Re-export the main contract types
 pub use advanced_cryptography::{post_quantum, threshold_signatures, zero_knowledge}; // Re-export advanced cryptography types
@@ -40,7 +47,9 @@ pub use l2_rollup::{L2Account, L2Block, L2Rollup, L2Transaction, RollupConfig, R
 pub use l2_state_management::{
     L2StateManager, SparseMerkleTree, StateCheckpointManager, StateSnapshot,
 }; // Re-export L2 state management types
-pub use liquidity_pool::{LiquidityPool, LiquidityPoolConfig, LiquidityPosition, PoolStats}; // Re-export liquidity pool types
+pub use liquidity_pool::{
+    LiquidityMechanisms, LiquidityPool, LiquidityPoolConfig, LiquidityPosition, PoolStats,
+}; // Re-export liquidity pool types
 pub use load_testing::{LoadTestConfig, LoadTestResult, LoadTester};
 pub use metaverse::{Building, BuildingType, LandParcel, MetaverseError, PeaceIsland};
 pub use nft::{MarketplaceListing, NFTCollection, NFTContract, NFTMetadata, NFT}; // Re-export NFT types
@@ -67,6 +76,9 @@ mod token_test;
 
 #[cfg(test)]
 mod treasury_test;
+
+#[cfg(test)]
+mod treasury_presale_test;
 
 #[cfg(test)]
 mod vesting_test;
@@ -108,10 +120,25 @@ mod charity_stable_payout_test; // Add NGO stable payout tests
 mod stable_liquidity_pool_test; // Add stable liquidity pool tests
 
 #[cfg(test)]
+mod cross_chain_liquidity_test; // Add cross-chain liquidity tests
+
+#[cfg(test)]
+mod dex_listing_test; // Add DEX listing orchestration tests
+
+#[cfg(test)]
 mod supply_chain_test;
 
 #[cfg(test)]
 mod metaverse_test;
+
+#[cfg(test)]
+mod compliance_test;
+
+#[cfg(test)]
+mod audit_registry_test;
+
+#[cfg(test)]
+mod ownership_test;
 
 #[cfg(test)]
 mod advanced_cryptography_test; // Add advanced cryptography tests

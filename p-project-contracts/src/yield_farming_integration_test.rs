@@ -113,6 +113,12 @@ mod tests {
         let user3_fees = fee_map.get("user3").unwrap();
         assert!(user3_fees > user1_fees);
 
+        // Fast-forward lock by adjusting start_time on positions before removal
+        for user in &users {
+            let pos = pool.liquidity_positions.get_mut(*user).unwrap();
+            pos.start_time = pos.start_time - chrono::Duration::days(pos.duration_days + 1);
+        }
+
         // Step 13: Users remove liquidity
         for user in &users {
             let result = pool.remove_liquidity(user);

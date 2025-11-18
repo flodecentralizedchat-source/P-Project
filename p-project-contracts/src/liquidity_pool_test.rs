@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::super::liquidity_pool::{LiquidityPool, LiquidityPoolError};
+    use super::super::liquidity_pool::{LiquidityMechanisms, LiquidityPool, LiquidityPoolError};
     use chrono::Utc;
     use std::collections::HashMap;
 
@@ -62,6 +62,24 @@ mod tests {
         assert_eq!(position.token_a_amount, 1000.0);
         assert_eq!(position.token_b_amount, 2000.0);
         assert_eq!(position.duration_days, 30);
+    }
+
+    #[test]
+    fn test_add_liquidity_enforces_minimum_lock() {
+        let mut pool = LiquidityPool::new(
+            "pool1".to_string(),
+            "TOKENA".to_string(),
+            "TOKENB".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            100000.0,
+            0.12,
+        );
+
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 7)
+            .unwrap();
+        let position = pool.get_position("user1").unwrap();
+        assert!(position.duration_days >= pool.mechanisms.lp_lock_days);
     }
 
     #[test]
@@ -134,6 +152,12 @@ mod tests {
         pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
             .unwrap();
 
+        // Fast-forward lock by adjusting start_time for testing removal
+        {
+            let pos = pool.liquidity_positions.get_mut("user1").unwrap();
+            pos.start_time = pos.start_time - chrono::Duration::days(pos.duration_days + 1);
+        }
+
         // Remove liquidity
         let result = pool.remove_liquidity("user1");
         assert!(result.is_ok());
@@ -163,6 +187,63 @@ mod tests {
 
         let result = pool.remove_liquidity("user1");
         assert_eq!(result, Err(LiquidityPoolError::UserNotInPool));
+    }
+
+    #[test]
+    fn test_remove_liquidity_locked() {
+        let mut pool = LiquidityPool::new(
+            "pool1".to_string(),
+            "TOKENA".to_string(),
+            "TOKENB".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            100000.0,
+            0.12,
+        );
+
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
+
+        // Removing immediately should be blocked by lock
+        let result = pool.remove_liquidity("user1");
+        assert_eq!(result, Err(LiquidityPoolError::LiquidityLocked));
+    }
+
+    #[test]
+    fn test_deep_liquidity_reduces_slippage() {
+        // Shallow pool
+        let mut shallow = LiquidityPool::new(
+            "shallow".to_string(),
+            "A".to_string(),
+            "B".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            1000.0,
+            0.10,
+        );
+        shallow
+            .add_liquidity("lp".to_string(), 1_000.0, 1_000.0, 7)
+            .unwrap();
+
+        // Deep pool
+        let mut deep = LiquidityPool::new(
+            "deep".to_string(),
+            "A".to_string(),
+            "B".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            1000.0,
+            0.10,
+        );
+        deep.add_liquidity("lp".to_string(), 1_000_000.0, 1_000_000.0, 7)
+            .unwrap();
+
+        let input = 10_000.0;
+        let out_shallow = shallow.calculate_swap_output("A", input).unwrap();
+        let out_deep = deep.calculate_swap_output("A", input).unwrap();
+
+        // Deep pool should have materially lower slippage => higher output
+        assert!(out_deep > out_shallow);
     }
 
     #[test]
@@ -229,6 +310,67 @@ mod tests {
         // Check volume and fees tracking
         assert_eq!(pool.total_volume, initial_volume + 100.0);
         assert_eq!(pool.total_fees, initial_fees + (100.0 * 0.003));
+    }
+
+    #[test]
+    fn test_swap_auto_liquidity_growth() {
+        let mut pool = LiquidityPool::new(
+            "pool1".to_string(),
+            "TOKENA".to_string(),
+            "TOKENB".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            100000.0,
+            0.12,
+        );
+
+        let mut mech = LiquidityMechanisms::default();
+        mech.auto_liquidity_rate_bps = 5000; // 50% of fees recycled
+        pool.set_mechanisms(mech);
+
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
+
+        let before_total_liquidity = pool.total_liquidity;
+        pool.swap("TOKENA", 100.0).unwrap();
+        assert!(pool.total_liquidity > before_total_liquidity);
+    }
+
+    #[test]
+    fn test_swap_with_slippage_success_and_failure() {
+        let mut pool = LiquidityPool::new(
+            "pool1".to_string(),
+            "TOKENA".to_string(),
+            "TOKENB".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            100000.0,
+            0.12,
+        );
+
+        pool.add_liquidity("user1".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
+
+        let expected = pool.calculate_swap_output("TOKENA", 100.0).unwrap();
+        let result = pool.swap_with_slippage("TOKENA", 100.0, expected, Some(10));
+        assert!(result.is_ok());
+
+        let mut pool_bad = LiquidityPool::new(
+            "pool2".to_string(),
+            "TOKENA".to_string(),
+            "TOKENB".to_string(),
+            0.003,
+            "REWARD".to_string(),
+            100000.0,
+            0.12,
+        );
+        pool_bad
+            .add_liquidity("user2".to_string(), 1000.0, 2000.0, 30)
+            .unwrap();
+
+        let expected = pool_bad.calculate_swap_output("TOKENA", 100.0).unwrap();
+        let result = pool_bad.swap_with_slippage("TOKENA", 100.0, expected * 1.1, Some(10));
+        assert_eq!(result, Err(LiquidityPoolError::SlippageExceeded));
     }
 
     #[test]

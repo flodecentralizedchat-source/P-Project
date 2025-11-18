@@ -4,6 +4,10 @@ use axum::{
     Router,
 };
 use p_project_core::database::MySqlDatabase;
+use p_project_core::{
+    ComponentStatus, EcosystemComponent, EcosystemComponentType, EcosystemLink,
+    UniqueValueProposition,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::limit::ConcurrencyLimitLayer;
@@ -25,12 +29,84 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = MySqlDatabase::new(&db_url).await?;
     db.init_tables().await?;
 
+    // Innovation state: UVPs, Partners, Ecosystem graph
+    let uvp_engine = {
+        let uvps = vec![
+            UniqueValueProposition {
+                id: "uvp_impact_oracles".into(),
+                name: "Proof-of-Impact Oracles".into(),
+                description: "AI+IoT verified impact boosts rewards".into(),
+                metric_key: "impact_verified".into(),
+                multiplier: 1.15,
+            },
+            UniqueValueProposition {
+                id: "uvp_peace_staking".into(),
+                name: "Peace Staking Bonus".into(),
+                description: "Stakers for social good earn more".into(),
+                metric_key: "peace_staker".into(),
+                multiplier: 1.10,
+            },
+            UniqueValueProposition {
+                id: "uvp_trusted_partner_tx".into(),
+                name: "Trusted Partnership Flow".into(),
+                description: "Transactions via trusted partners get a small boost".into(),
+                metric_key: "trusted_partner_tx".into(),
+                multiplier: 1.05,
+            },
+        ];
+        p_project_core::UvpEngine::new(uvps)
+    };
+
+    let ecosystem_graph = {
+        let mut g = p_project_core::EcosystemGraph::new();
+        g.add_component(EcosystemComponent {
+            id: "core".into(),
+            name: "Core".into(),
+            component_type: EcosystemComponentType::Service,
+            version: "1.0.0".into(),
+            status: ComponentStatus::Healthy,
+            metadata: serde_json::json!({}),
+        });
+        g.add_component(EcosystemComponent {
+            id: "api".into(),
+            name: "API".into(),
+            component_type: EcosystemComponentType::API,
+            version: "1.0.0".into(),
+            status: ComponentStatus::Healthy,
+            metadata: serde_json::json!({}),
+        });
+        g.add_component(EcosystemComponent {
+            id: "web".into(),
+            name: "Web".into(),
+            component_type: EcosystemComponentType::UI,
+            version: "1.0.0".into(),
+            status: ComponentStatus::Healthy,
+            metadata: serde_json::json!({}),
+        });
+        let _ = g.add_link(EcosystemLink {
+            from_id: "core".into(),
+            to_id: "api".into(),
+            relation: "exposes".into(),
+        });
+        let _ = g.add_link(EcosystemLink {
+            from_id: "api".into(),
+            to_id: "web".into(),
+            relation: "serves".into(),
+        });
+        g
+    };
+
+    let partner_registry = p_project_core::PartnerRegistry::new();
+
     let app_state = shared::AppState {
         db: Arc::new(db),
         rate_limiter: Arc::new(crate::ratelimit::RateLimiter::from_env()),
         strict_rate_limiter: Arc::new(crate::ratelimit::RateLimiter::from_env_with_prefix(
             "STRICT_RATE_LIMIT_",
         )),
+        uvp_engine: Arc::new(tokio::sync::RwLock::new(uvp_engine)),
+        partner_registry: Arc::new(tokio::sync::RwLock::new(partner_registry)),
+        ecosystem_graph: Arc::new(tokio::sync::RwLock::new(ecosystem_graph)),
     };
 
     // Build routers
@@ -42,8 +118,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/airdrop/status", get(handlers::get_airdrop_status))
         .route("/airdrop/recipients", get(handlers::get_airdrop_recipients))
         .route("/tokenomics/summary", get(handlers::get_tokenomics_summary))
+        .route(
+            "/strategy/exchange-listings",
+            get(handlers::get_exchange_listings_strategy),
+        )
         .route("/learning/content", get(handlers::list_learning_content))
-        .route("/learning/content/:id", get(handlers::get_learning_content));
+        .route("/learning/content/:id", get(handlers::get_learning_content))
+        .route("/events", get(handlers::list_events))
+        .route("/events/:id", get(handlers::get_event))
+        .route(
+            "/budget/alternatives",
+            get(handlers::list_budget_alternatives),
+        )
+        .route(
+            "/budget/alternatives/:id",
+            get(handlers::get_budget_alternative),
+        )
+        .route(
+            "/budget/alternatives/:id/simulate",
+            post(handlers::simulate_budget_alternative),
+        )
+        // Innovation public endpoints
+        .route("/innovation/uvp", get(handlers::get_uvp_summary))
+        .route(
+            "/innovation/ecosystem",
+            get(handlers::get_ecosystem_overview),
+        );
 
     // Protected endpoints (require JWT)
     let protected = Router::new()
@@ -54,6 +154,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(handlers::get_user).patch(handlers::update_user),
         )
         .route("/transfer", post(handlers::transfer_tokens))
+        // Referral endpoints
+        .route(
+            "/referrals/code/generate",
+            post(handlers::generate_referral_code),
+        )
+        .route("/referrals/accept", post(handlers::accept_referral))
+        .route("/referrals/stats/:id", get(handlers::get_referral_stats))
         // Remittance endpoints
         .route("/remittance/quote", post(handlers::remittance_quote))
         .route("/remittance/initiate", post(handlers::remittance_initiate))
@@ -206,11 +313,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/merchant/cashback/transaction",
             post(handlers::get_cashback_transaction),
         )
+        // Innovation protected endpoints
+        .route(
+            "/innovation/uvp/compute",
+            post(handlers::compute_uvp_multiplier),
+        )
+        .route("/innovation/partners", get(handlers::list_partners))
         .route_layer(middleware::from_fn(crate::middleware::require_jwt));
 
     // Admin-only routes
     let admin = Router::new()
         .route("/airdrop/create", post(handlers::create_airdrop))
+        .route("/events", post(handlers::create_event))
+        .route(
+            "/budget/alternatives",
+            post(handlers::create_budget_alternative),
+        )
         .route(
             "/web2/create-donation-widget",
             post(handlers::create_donation_widget),
@@ -233,6 +351,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/merchant/cashback/configure",
             post(handlers::configure_cashback),
+        )
+        // Innovation admin endpoints
+        .route(
+            "/innovation/partners/register",
+            post(handlers::register_partner),
         )
         .route_layer(middleware::from_fn(crate::middleware::require_admin))
         .route_layer(middleware::from_fn(crate::middleware::require_jwt));

@@ -9,6 +9,13 @@ pub enum TreasuryError {
     InsufficientFunds,
     InvalidAmount,
     TokenOperationFailed(String),
+    PresaleClosed,
+    PresaleWhitelistRequired,
+    PresaleAllocationExceeded,
+    PresaleTargetReached,
+    ReserveNotLocked,
+    DevelopmentMilestoneNotFound,
+    DevelopmentMilestoneAlreadyReleased,
     DatabaseError(String),
     SerializationError(String),
     NGOAccountNotFound,
@@ -21,6 +28,28 @@ impl std::fmt::Display for TreasuryError {
             TreasuryError::InvalidAmount => write!(f, "Amount must be positive"),
             TreasuryError::TokenOperationFailed(msg) => {
                 write!(f, "Token operation failed: {}", msg)
+            }
+            TreasuryError::PresaleClosed => write!(f, "Presale is not accepting new contributions"),
+            TreasuryError::PresaleWhitelistRequired => {
+                write!(
+                    f,
+                    "Address must be whitelisted before contributing to the presale"
+                )
+            }
+            TreasuryError::PresaleAllocationExceeded => {
+                write!(f, "Presale allocation has been depleted")
+            }
+            TreasuryError::PresaleTargetReached => {
+                write!(f, "Presale funding target has already been met")
+            }
+            TreasuryError::ReserveNotLocked => {
+                write!(f, "Reserve allocation is not currently locked for release")
+            }
+            TreasuryError::DevelopmentMilestoneNotFound => {
+                write!(f, "Development milestone not found")
+            }
+            TreasuryError::DevelopmentMilestoneAlreadyReleased => {
+                write!(f, "Development milestone already released")
             }
             TreasuryError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
             TreasuryError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
@@ -39,6 +68,130 @@ pub struct TreasuryAllocation {
     pub purpose: String,
 }
 
+/// Configuration for the presale/funding raise
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresaleProgram {
+    pub allocation_percent: f64,
+    pub token_allocation: f64,
+    pub tokens_remaining: f64,
+    pub funding_target: f64,
+    pub price_per_token: f64,
+    pub total_raised: f64,
+    pub whitelist: HashMap<String, bool>,
+    pub contributions: HashMap<String, f64>,
+    pub public_phase: bool,
+}
+
+impl PresaleProgram {
+    pub fn new() -> Self {
+        Self {
+            allocation_percent: 0.10,
+            token_allocation: 0.0,
+            tokens_remaining: 0.0,
+            funding_target: 200000.0,
+            price_per_token: 0.0,
+            total_raised: 0.0,
+            whitelist: HashMap::new(),
+            contributions: HashMap::new(),
+            public_phase: false,
+        }
+    }
+
+    pub fn configure(&mut self, total_supply: f64, funding_target: f64) {
+        self.funding_target = funding_target;
+        let allocation = total_supply * self.allocation_percent;
+        self.token_allocation = allocation;
+        self.tokens_remaining = allocation;
+        self.price_per_token = if allocation > 0.0 {
+            funding_target / allocation
+        } else {
+            0.0
+        };
+        self.total_raised = 0.0;
+        self.whitelist.clear();
+        self.contributions.clear();
+        self.public_phase = false;
+    }
+
+    pub fn can_contribute(&self, user_id: &str) -> bool {
+        self.public_phase || self.whitelist.contains_key(user_id)
+    }
+
+    pub fn whitelist_user(&mut self, user_id: &str) {
+        self.whitelist.insert(user_id.to_string(), true);
+    }
+
+    pub fn remove_whitelist_user(&mut self, user_id: &str) {
+        self.whitelist.remove(user_id);
+    }
+}
+
+/// Emergency reserve allocation locked for crash protection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReserveAllocation {
+    pub locked_tokens: f64,
+    pub lock_reason: Option<String>,
+    pub is_locked: bool,
+}
+
+impl ReserveAllocation {
+    pub fn new() -> Self {
+        Self {
+            locked_tokens: 0.0,
+            lock_reason: None,
+            is_locked: false,
+        }
+    }
+}
+
+/// Development fund with milestone-based releases
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DevelopmentMilestone {
+    pub name: String,
+    pub description: String,
+    pub release_amount: f64,
+    pub completed: bool,
+    pub completed_at: Option<NaiveDateTime>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DevelopmentFund {
+    pub total_allocation: f64,
+    pub released_amount: f64,
+    pub milestones: Vec<DevelopmentMilestone>,
+}
+
+impl DevelopmentFund {
+    pub fn new() -> Self {
+        Self {
+            total_allocation: 0.0,
+            released_amount: 0.0,
+            milestones: Vec::new(),
+        }
+    }
+
+    pub fn configure(&mut self, total_supply: f64) {
+        self.total_allocation = total_supply * 0.03;
+        self.released_amount = 0.0;
+        self.milestones.clear();
+    }
+
+    pub fn remaining(&self) -> f64 {
+        (self.total_allocation - self.released_amount).max(0.0)
+    }
+
+    pub fn schedule_milestone(&mut self, name: String, description: String, release_amount: f64) {
+        let milestone = DevelopmentMilestone {
+            name,
+            description,
+            release_amount,
+            completed: false,
+            completed_at: None,
+        };
+        self.milestones.push(milestone);
+    }
+}
+
 // Buyback record structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuybackRecord {
@@ -46,6 +199,43 @@ pub struct BuybackRecord {
     pub amount_spent: f64,
     pub tokens_bought: f64,
     pub price_per_token: f64,
+}
+
+// Structure for scheduled buybacks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuybackSchedule {
+    pub timestamp: NaiveDateTime,
+    pub amount: f64,
+    pub target_price: f64,
+    pub executed: bool,
+}
+
+/// Supported conditions that can trigger a buyback event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BuybackCondition {
+    PriceDrop,   // Threshold measured in percentage drop (e.g., 5.0 => price dropped by 5%)
+    VolumeSpike, // Threshold measured in percentage gain
+    PriceBelow,  // Threshold measured in absolute price
+    PriceAbove,  // Threshold measured in absolute price
+}
+
+/// Snapshot of market data provided to the treasury when evaluating triggers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketSnapshot {
+    pub price: f64,
+    pub volume: f64,
+    pub price_change_percentage: f64,
+    pub volume_change_percentage: f64,
+}
+
+// Structure for trigger-based buybacks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuybackTrigger {
+    pub trigger_name: String,
+    pub condition: BuybackCondition,
+    pub threshold: f64, // Threshold value for the condition
+    pub amount: f64,    // Amount to spend on buyback
+    pub executed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +250,14 @@ pub struct Treasury {
     multisig_required: usize,      // Number of signatures required
     pending_transactions: HashMap<String, PendingTransaction>, // tx_id -> transaction
     ngo_treasuries: HashMap<String, NGOTreasuryAccount>,
+    // New fields for enhanced buyback mechanisms
+    scheduled_buybacks: Vec<BuybackSchedule>, // Scheduled buyback programs
+    auto_buyback_enabled: bool,               // Whether auto buybacks are enabled
+    buyback_triggers: Vec<BuybackTrigger>,    // Trigger-based buyback programs
+    // Funding controls
+    presale_program: PresaleProgram,
+    reserve_allocation: ReserveAllocation,
+    development_fund: DevelopmentFund,
 }
 
 // Structure for pending multi-sig transactions
@@ -113,6 +311,13 @@ impl Treasury {
             multisig_required: 3, // Default 3-of-5 multi-sig
             pending_transactions: HashMap::new(),
             ngo_treasuries: HashMap::new(),
+            // Initialize new fields for enhanced buyback mechanisms
+            scheduled_buybacks: Vec::new(),
+            auto_buyback_enabled: false,
+            buyback_triggers: Vec::new(),
+            presale_program: PresaleProgram::new(),
+            reserve_allocation: ReserveAllocation::new(),
+            development_fund: DevelopmentFund::new(),
         }
     }
 
@@ -438,6 +643,218 @@ impl Treasury {
         Ok(tokens_to_buy)
     }
 
+    /// Add a scheduled buyback
+    pub fn add_scheduled_buyback(
+        &mut self,
+        timestamp: NaiveDateTime,
+        amount: f64,
+        target_price: f64,
+    ) -> Result<(), TreasuryError> {
+        if amount <= 0.0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        if amount > self.get_balance("USD") {
+            return Err(TreasuryError::InsufficientFunds);
+        }
+
+        let scheduled_buyback = BuybackSchedule {
+            timestamp,
+            amount,
+            target_price,
+            executed: false,
+        };
+        self.scheduled_buybacks.push(scheduled_buyback);
+
+        Ok(())
+    }
+
+    /// Execute scheduled buybacks that are due
+    pub fn execute_scheduled_buybacks(
+        &mut self,
+        token: &mut PProjectToken,
+        current_token_price: f64,
+    ) -> Result<f64, TreasuryError> {
+        if !self.auto_buyback_enabled {
+            return Ok(0.0);
+        }
+
+        let now = Utc::now().naive_utc();
+        let mut total_tokens_bought = 0.0;
+
+        for i in 0..self.scheduled_buybacks.len() {
+            if !self.scheduled_buybacks[i].executed && self.scheduled_buybacks[i].timestamp <= now {
+                if self.scheduled_buybacks[i].amount > 0.0
+                    && self.scheduled_buybacks[i].amount <= self.get_balance("USD")
+                {
+                    // Calculate how many tokens we can buy
+                    let tokens_to_buy =
+                        self.scheduled_buybacks[i].amount / self.scheduled_buybacks[i].target_price;
+
+                    // Record the buyback
+                    let buyback_record = BuybackRecord {
+                        timestamp: Utc::now().naive_utc(),
+                        amount_spent: self.scheduled_buybacks[i].amount,
+                        tokens_bought: tokens_to_buy,
+                        price_per_token: self.scheduled_buybacks[i].target_price,
+                    };
+
+                    self.buyback_records.push(buyback_record);
+                    self.total_buybacks += self.scheduled_buybacks[i].amount;
+                    total_tokens_bought += tokens_to_buy;
+                    self.scheduled_buybacks[i].executed = true;
+
+                    // Deduct funds from treasury
+                    let current_balance = self.get_balance("USD");
+                    self.reserves.insert(
+                        "USD".to_string(),
+                        current_balance - self.scheduled_buybacks[i].amount,
+                    );
+
+                    // Burn the tokens to reduce supply (deflationary mechanism)
+                    match token.burn_tokens(tokens_to_buy) {
+                        Ok(_) => {
+                            println!(
+                                "Treasury bought and burned {} tokens at ${} each, spending ${}",
+                                tokens_to_buy,
+                                self.scheduled_buybacks[i].target_price,
+                                self.scheduled_buybacks[i].amount
+                            );
+                        }
+                        Err(e) => {
+                            println!("Warning: Failed to burn tokens: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(total_tokens_bought)
+    }
+
+    /// Add a buyback trigger
+    pub fn add_buyback_trigger(
+        &mut self,
+        trigger_name: String,
+        condition: BuybackCondition,
+        threshold: f64,
+        amount: f64,
+    ) -> Result<(), TreasuryError> {
+        if amount <= 0.0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        if amount > self.get_balance("USD") {
+            return Err(TreasuryError::InsufficientFunds);
+        }
+
+        if threshold < 0.0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        let buyback_trigger = BuybackTrigger {
+            trigger_name,
+            condition,
+            threshold,
+            amount,
+            executed: false,
+        };
+        self.buyback_triggers.push(buyback_trigger);
+
+        Ok(())
+    }
+
+    /// Check and execute buyback triggers based on market conditions
+    pub fn check_buyback_triggers(
+        &mut self,
+        token: &mut PProjectToken,
+        snapshot: &MarketSnapshot,
+    ) -> Result<f64, TreasuryError> {
+        if !self.auto_buyback_enabled {
+            return Ok(0.0);
+        }
+
+        let mut total_tokens_bought = 0.0;
+
+        for i in 0..self.buyback_triggers.len() {
+            if !self.buyback_triggers[i].executed {
+                let should_execute = match self.buyback_triggers[i].condition {
+                    BuybackCondition::PriceDrop => {
+                        snapshot.price_change_percentage <= -self.buyback_triggers[i].threshold
+                    }
+                    BuybackCondition::VolumeSpike => {
+                        snapshot.volume_change_percentage >= self.buyback_triggers[i].threshold
+                    }
+                    BuybackCondition::PriceBelow => {
+                        snapshot.price <= self.buyback_triggers[i].threshold
+                    }
+                    BuybackCondition::PriceAbove => {
+                        snapshot.price >= self.buyback_triggers[i].threshold
+                    }
+                };
+
+                if should_execute {
+                    if self.buyback_triggers[i].amount > 0.0
+                        && self.buyback_triggers[i].amount <= self.get_balance("USD")
+                    {
+                        // Calculate how many tokens we can buy
+                        let tokens_to_buy = self.buyback_triggers[i].amount / snapshot.price;
+
+                        // Record the buyback
+                        let buyback_record = BuybackRecord {
+                            timestamp: Utc::now().naive_utc(),
+                            amount_spent: self.buyback_triggers[i].amount,
+                            tokens_bought: tokens_to_buy,
+                            price_per_token: snapshot.price,
+                        };
+
+                        self.buyback_records.push(buyback_record);
+                        self.total_buybacks += self.buyback_triggers[i].amount;
+                        total_tokens_bought += tokens_to_buy;
+                        self.buyback_triggers[i].executed = true;
+
+                        // Deduct funds from treasury
+                        let current_balance = self.get_balance("USD");
+                        self.reserves.insert(
+                            "USD".to_string(),
+                            current_balance - self.buyback_triggers[i].amount,
+                        );
+
+                        // Burn the tokens to reduce supply (deflationary mechanism)
+                        match token.burn_tokens(tokens_to_buy) {
+                            Ok(_) => {
+                                println!(
+                                    "Treasury bought and burned {} tokens at ${} each, spending ${}",
+                                    tokens_to_buy, snapshot.price, self.buyback_triggers[i].amount
+                                );
+                            }
+                            Err(e) => {
+                                println!("Warning: Failed to burn tokens: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(total_tokens_bought)
+    }
+
+    /// Enable or disable auto buybacks
+    pub fn set_auto_buyback_enabled(&mut self, enabled: bool) {
+        self.auto_buyback_enabled = enabled;
+    }
+
+    /// Get all scheduled buybacks
+    pub fn get_scheduled_buybacks(&self) -> &Vec<BuybackSchedule> {
+        &self.scheduled_buybacks
+    }
+
+    /// Get all buyback triggers
+    pub fn get_buyback_triggers(&self) -> &Vec<BuybackTrigger> {
+        &self.buyback_triggers
+    }
+
     /// Get total buybacks executed
     pub fn get_total_buybacks(&self) -> f64 {
         self.total_buybacks
@@ -448,6 +865,11 @@ impl Treasury {
         &self.buyback_records
     }
 
+    /// Read current reserve balance for a specific asset (e.g., USD)
+    pub fn get_reserve_balance(&self, asset: &str) -> f64 {
+        *self.reserves.get(asset).unwrap_or(&0.0)
+    }
+
     /// Check if treasury is DAO controlled
     pub fn is_dao_controlled(&self) -> bool {
         self.dao_controlled
@@ -456,6 +878,143 @@ impl Treasury {
     /// Set DAO control status
     pub fn set_dao_controlled(&mut self, controlled: bool) {
         self.dao_controlled = controlled;
+    }
+
+    /// Configure the presale/funding raise parameters
+    pub fn configure_presale(&mut self, total_supply: f64, funding_target: f64) {
+        self.presale_program.configure(total_supply, funding_target);
+    }
+
+    /// Add a user to the presale whitelist
+    pub fn add_presale_whitelist(&mut self, user_id: &str) {
+        self.presale_program.whitelist_user(user_id);
+    }
+
+    /// Remove a user from the presale whitelist
+    pub fn remove_presale_whitelist(&mut self, user_id: &str) {
+        self.presale_program.remove_whitelist_user(user_id);
+    }
+
+    /// Open the presale to the public
+    pub fn open_presale_public_phase(&mut self) {
+        self.presale_program.public_phase = true;
+    }
+
+    /// Attempt to contribute to the presale
+    pub fn contribute_to_presale(
+        &mut self,
+        user_id: &str,
+        amount: f64,
+    ) -> Result<f64, TreasuryError> {
+        if amount <= 0.0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        if self.presale_program.price_per_token <= 0.0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        if self.presale_program.total_raised >= self.presale_program.funding_target {
+            return Err(TreasuryError::PresaleTargetReached);
+        }
+
+        if self.presale_program.tokens_remaining <= 0.0 {
+            return Err(TreasuryError::PresaleAllocationExceeded);
+        }
+
+        if !self.presale_program.can_contribute(user_id) {
+            return Err(TreasuryError::PresaleWhitelistRequired);
+        }
+
+        let tokens = amount / self.presale_program.price_per_token;
+        if tokens > self.presale_program.tokens_remaining {
+            return Err(TreasuryError::PresaleAllocationExceeded);
+        }
+
+        *self
+            .presale_program
+            .contributions
+            .entry(user_id.to_string())
+            .or_insert(0.0) += amount;
+        self.presale_program.total_raised += amount;
+        self.presale_program.tokens_remaining -= tokens;
+        *self.reserves.entry("USD".to_string()).or_insert(0.0) += amount;
+
+        Ok(tokens)
+    }
+
+    /// Get presale program details for telemetry
+    pub fn get_presale_program(&self) -> &PresaleProgram {
+        &self.presale_program
+    }
+
+    /// Lock the crash reserve allocation
+    pub fn lock_reserve(&mut self, total_supply: f64, reason: String) {
+        self.reserve_allocation.locked_tokens = total_supply * 0.15;
+        self.reserve_allocation.lock_reason = Some(reason);
+        self.reserve_allocation.is_locked = true;
+    }
+
+    /// Release the locked reserve allocation (only once)
+    pub fn release_reserve(&mut self) -> Result<f64, TreasuryError> {
+        if !self.reserve_allocation.is_locked || self.reserve_allocation.locked_tokens <= 0.0 {
+            return Err(TreasuryError::ReserveNotLocked);
+        }
+
+        let amount = self.reserve_allocation.locked_tokens;
+        self.reserve_allocation.locked_tokens = 0.0;
+        self.reserve_allocation.is_locked = false;
+        self.reserve_allocation.lock_reason = Some("Released after emergency".to_string());
+        Ok(amount)
+    }
+
+    /// Check whether reserve is locked
+    pub fn is_reserve_locked(&self) -> bool {
+        self.reserve_allocation.is_locked
+    }
+
+    /// Configure the development fund allocation
+    pub fn configure_development_fund(&mut self, total_supply: f64) {
+        self.development_fund.configure(total_supply);
+    }
+
+    /// Schedule a milestone-based release for the development fund
+    pub fn schedule_development_milestone(
+        &mut self,
+        name: String,
+        description: String,
+        release_amount: f64,
+    ) {
+        self.development_fund
+            .schedule_milestone(name, description, release_amount);
+    }
+
+    /// Release tokens for a completed milestone
+    pub fn release_development_milestone(&mut self, name: &str) -> Result<f64, TreasuryError> {
+        let milestone = self
+            .development_fund
+            .milestones
+            .iter_mut()
+            .find(|milestone| milestone.name == name)
+            .ok_or(TreasuryError::DevelopmentMilestoneNotFound)?;
+
+        if milestone.completed {
+            return Err(TreasuryError::DevelopmentMilestoneAlreadyReleased);
+        }
+
+        if milestone.release_amount > self.development_fund.remaining() {
+            return Err(TreasuryError::InvalidAmount);
+        }
+
+        milestone.completed = true;
+        milestone.completed_at = Some(Utc::now().naive_utc());
+        self.development_fund.released_amount += milestone.release_amount;
+        Ok(milestone.release_amount)
+    }
+
+    /// Get current development fund snapshot
+    pub fn get_development_fund(&self) -> &DevelopmentFund {
+        &self.development_fund
     }
 }
 
@@ -525,5 +1084,99 @@ impl LiquidityMiningProgram {
     pub fn is_active(&self) -> bool {
         let now = Utc::now().naive_utc();
         now >= self.start_date && now <= self.end_date
+    }
+
+    /// Remaining rewards that can still be distributed
+    pub fn remaining_rewards(&self) -> f64 {
+        (self.total_rewards - self.distributed_rewards).max(0.0)
+    }
+
+    /// Distribute rewards for the given number of days to all participants.
+    /// Caps distribution so total distributed never exceeds total_rewards.
+    pub fn distribute_rewards(&mut self, days: f64) -> HashMap<String, f64> {
+        let mut rewards: HashMap<String, f64> = HashMap::new();
+
+        if !self.is_active() || self.participants.is_empty() || days <= 0.0 {
+            return rewards;
+        }
+
+        let total_liquidity = self.get_total_liquidity();
+        if total_liquidity <= 0.0 {
+            return rewards;
+        }
+
+        // Compute raw rewards per participant
+        let daily_reward_per_token = self.reward_rate / total_liquidity;
+        let mut total_required = 0.0;
+        let mut raw: Vec<(String, f64)> = Vec::new();
+        for (user, liq) in self.participants.iter() {
+            let r = daily_reward_per_token * *liq * days;
+            if r > 0.0 {
+                total_required += r;
+                raw.push((user.clone(), r));
+            }
+        }
+
+        let remaining = self.remaining_rewards();
+        if total_required <= 0.0 || remaining <= 0.0 {
+            return rewards;
+        }
+
+        // Scale rewards if needed to not exceed remaining
+        let scale = if total_required > remaining {
+            remaining / total_required
+        } else {
+            1.0
+        };
+
+        let mut actually_distributed = 0.0;
+        for (user, r) in raw.into_iter() {
+            let amt = r * scale;
+            if amt > 0.0 {
+                actually_distributed += amt;
+                rewards.insert(user, amt);
+            }
+        }
+
+        self.distributed_rewards += actually_distributed;
+        rewards
+    }
+}
+
+/// Summary report for publishing treasury state and allocations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreasuryReport {
+    pub generated_at: NaiveDateTime,
+    pub reserves: HashMap<String, f64>,
+    pub allocations: Vec<TreasuryAllocation>,
+    pub buyback_records: Vec<BuybackRecord>,
+    pub total_buybacks: f64,
+    pub pending_transactions: Vec<PendingTransaction>,
+    pub ngo_treasuries: HashMap<String, NGOTreasuryAccount>,
+}
+
+impl Treasury {
+    /// Generate a snapshot report of the current treasury state
+    pub fn generate_report(&self) -> Result<TreasuryReport, TreasuryError> {
+        let reserves = self.reserves.clone();
+        let allocations = self.allocations.clone();
+        let buyback_records = self.buyback_records.clone();
+        let total_buybacks = self.total_buybacks;
+        let pending_transactions = self
+            .pending_transactions
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let ngo_treasuries = self.ngo_treasuries.clone();
+
+        Ok(TreasuryReport {
+            generated_at: Utc::now().naive_utc(),
+            reserves,
+            allocations,
+            buyback_records,
+            total_buybacks,
+            pending_transactions,
+            ngo_treasuries,
+        })
     }
 }

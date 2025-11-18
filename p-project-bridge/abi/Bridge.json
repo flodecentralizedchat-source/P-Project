@@ -1,4 +1,28 @@
 [
+  { "type": "function", "name": "owner", "stateMutability": "view", "inputs": [], "outputs": [{"type": "address"}] },
+  { "type": "function", "name": "nonce", "stateMutability": "view", "inputs": [], "outputs": [{"type": "uint256"}] },
+  { "type": "function", "name": "paused", "stateMutability": "view", "inputs": [], "outputs": [{"type": "bool"}] },
+  { "type": "function", "name": "kycRequired", "stateMutability": "view", "inputs": [], "outputs": [{"type": "bool"}] },
+  { "type": "function", "name": "enforceTokenAllowlist", "stateMutability": "view", "inputs": [], "outputs": [{"type": "bool"}] },
+  { "type": "function", "name": "kycApproved", "stateMutability": "view", "inputs": [{"name":"account","type":"address"}], "outputs": [{"type":"bool"}] },
+  { "type": "function", "name": "blocked", "stateMutability": "view", "inputs": [{"name":"account","type":"address"}], "outputs": [{"type":"bool"}] },
+  { "type": "function", "name": "tokenAllowed", "stateMutability": "view", "inputs": [{"name":"token","type":"address"}], "outputs": [{"type":"bool"}] },
+  { "type": "function", "name": "processedLockIds", "stateMutability": "view", "inputs": [{"name":"lockId","type":"bytes32"}], "outputs": [{"type":"bool"}] },
+
+  {
+    "type": "function",
+    "name": "audit",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      { "name": "firm", "type": "string" },
+      { "name": "reportURI", "type": "string" },
+      { "name": "reportHash", "type": "bytes32" },
+      { "name": "timestamp", "type": "uint256" },
+      { "name": "finalized", "type": "bool" }
+    ]
+  },
+
   {
     "type": "function",
     "name": "lock",
@@ -8,9 +32,7 @@
       { "name": "amount", "type": "uint256" },
       { "name": "recipient", "type": "address" }
     ],
-    "outputs": [
-      { "name": "lockId", "type": "bytes32" }
-    ]
+    "outputs": [ { "name": "lockId", "type": "bytes32" } ]
   },
   {
     "type": "function",
@@ -25,26 +47,70 @@
     "outputs": []
   },
   {
-    "type": "event",
-    "name": "Locked",
+    "type": "function",
+    "name": "withdraw",
+    "stateMutability": "nonpayable",
     "inputs": [
+      { "name": "token", "type": "address" },
+      { "name": "to", "type": "address" },
+      { "name": "amount", "type": "uint256" }
+    ],
+    "outputs": []
+  },
+
+  { "type": "function", "name": "pause", "stateMutability": "nonpayable", "inputs": [], "outputs": [] },
+  { "type": "function", "name": "unpause", "stateMutability": "nonpayable", "inputs": [], "outputs": [] },
+  { "type": "function", "name": "setKycRequired", "stateMutability": "nonpayable", "inputs": [{"name":"required","type":"bool"}], "outputs": [] },
+  { "type": "function", "name": "setKyc", "stateMutability": "nonpayable", "inputs": [{"name":"account","type":"address"},{"name":"approved","type":"bool"}], "outputs": [] },
+  { "type": "function", "name": "setBlocked", "stateMutability": "nonpayable", "inputs": [{"name":"account","type":"address"},{"name":"isBlocked","type":"bool"}], "outputs": [] },
+  { "type": "function", "name": "setEnforceTokenAllowlist", "stateMutability": "nonpayable", "inputs": [{"name":"enforce","type":"bool"}], "outputs": [] },
+  { "type": "function", "name": "setTokenAllowed", "stateMutability": "nonpayable", "inputs": [{"name":"token","type":"address"},{"name":"allowed","type":"bool"}], "outputs": [] },
+
+  { "type": "function", "name": "transferOwnership", "stateMutability": "nonpayable", "inputs": [{"name":"newOwner","type":"address"}], "outputs": [] },
+  { "type": "function", "name": "renounceOwnership", "stateMutability": "nonpayable", "inputs": [], "outputs": [] },
+
+  {
+    "type": "function",
+    "name": "setAuditInfo",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {"name":"firm","type":"string"},
+      {"name":"reportURI","type":"string"},
+      {"name":"reportHash","type":"bytes32"},
+      {"name":"timestamp","type":"uint256"}
+    ],
+    "outputs": []
+  },
+  { "type": "function", "name": "finalizeAudit", "stateMutability": "nonpayable", "inputs": [], "outputs": [] },
+
+  { "type": "event", "name": "Locked", "inputs": [
       { "name": "lockId", "type": "bytes32", "indexed": true },
       { "name": "token", "type": "address", "indexed": true },
       { "name": "sender", "type": "address", "indexed": true },
       { "name": "amount", "type": "uint256", "indexed": false },
       { "name": "recipient", "type": "address", "indexed": false }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "Minted",
-    "inputs": [
+    ], "anonymous": false },
+  { "type": "event", "name": "Minted", "inputs": [
       { "name": "lockId", "type": "bytes32", "indexed": true },
       { "name": "token", "type": "address", "indexed": true },
       { "name": "recipient", "type": "address", "indexed": true },
       { "name": "amount", "type": "uint256", "indexed": false }
-    ],
-    "anonymous": false
-  }
+    ], "anonymous": false },
+
+  { "type": "event", "name": "OwnershipTransferred", "inputs": [
+      { "name": "previousOwner", "type": "address", "indexed": true },
+      { "name": "newOwner", "type": "address", "indexed": true }
+    ], "anonymous": false },
+  { "type": "event", "name": "OwnershipRenounced", "inputs": [
+      { "name": "previousOwner", "type": "address", "indexed": true }
+    ], "anonymous": false },
+  { "type": "event", "name": "Paused", "inputs": [ { "name": "account", "type": "address", "indexed": true } ], "anonymous": false },
+  { "type": "event", "name": "Unpaused", "inputs": [ { "name": "account", "type": "address", "indexed": true } ], "anonymous": false },
+  { "type": "event", "name": "TokenAllowlistUpdated", "inputs": [ { "name": "token", "type": "address", "indexed": true }, { "name": "allowed", "type": "bool", "indexed": false } ], "anonymous": false },
+  { "type": "event", "name": "AddressBlocklistUpdated", "inputs": [ { "name": "account", "type": "address", "indexed": true }, { "name": "blocked", "type": "bool", "indexed": false } ], "anonymous": false },
+  { "type": "event", "name": "KycStatusUpdated", "inputs": [ { "name": "account", "type": "address", "indexed": true }, { "name": "approved", "type": "bool", "indexed": false } ], "anonymous": false },
+  { "type": "event", "name": "KycRequiredUpdated", "inputs": [ { "name": "required", "type": "bool", "indexed": false } ], "anonymous": false },
+  { "type": "event", "name": "EnforceTokenAllowlistUpdated", "inputs": [ { "name": "enforce", "type": "bool", "indexed": false } ], "anonymous": false },
+  { "type": "event", "name": "AuditInfoUpdated", "inputs": [ { "name": "firm", "type": "string", "indexed": false }, { "name": "reportURI", "type": "string", "indexed": false }, { "name": "reportHash", "type": "bytes32", "indexed": false }, { "name": "timestamp", "type": "uint256", "indexed": false } ], "anonymous": false },
+  { "type": "event", "name": "AuditFinalized", "inputs": [], "anonymous": false }
 ]

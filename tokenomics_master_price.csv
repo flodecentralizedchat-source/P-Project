@@ -34,7 +34,9 @@ LAUNCH_STRATEGY,Partnership Focus,Strategic alliances,In-kind liquidity contribu
 LAUNCH_STRATEGY,DEX Launch Strategy,Start with low-cost DEX,Minimize listing fees,,,
 LAUNCH_STRATEGY,Organic Marketing,Community building focus,Social media engagement,,,
 LAUNCH_STRATEGY,Influencer Strategy,Micro-influencers only,Budget-friendly promotion,,,
-PRICE_MODEL,Target Price,0.20,Requires: MC 14M,Increase users + LP,,
-PRICE_MODEL,Target Price,0.50,Requires: MC 35M,Staking + burns,,
-PRICE_MODEL,Target Price,1.00,Requires: MC 70M,CEX listing,,
-PRICE_MODEL,Target Price,5.00,Requires: MC 350M,Global adoption,,
+LAUNCH_STRATEGY,DEX Listing Guide,Major platforms overview,Listing requirements,,,
+LAUNCH_STRATEGY,Listing Fees,Varies by platform,$0-$5000 range,,,
+PRICE_MODEL,Target Price,0.20,$14M,Users + LP growth,Adoption phase,Adoption push
+PRICE_MODEL,Target Price,0.50,$35M,Staking + burns,Ecosystem expansion,
+PRICE_MODEL,Target Price,1.00,$70M,CEX listing,Global visibility,
+PRICE_MODEL,Target Price,5.00,$350M,Mass adoption,Full ecosystem,Global scale

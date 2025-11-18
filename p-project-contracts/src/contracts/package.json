@@ -1,0 +1,46 @@
+{
+  "name": "p-project-contracts",
+  "version": "1.0.0",
+  "description": "Smart contracts for P-Project token ecosystem",
+  "main": "index.js",
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+    "deploy:testnet": "npx hardhat run deploy.js --network bscTestnet",
+    "deploy:mainnet": "npx hardhat run deploy.js --network bsc",
+    "verify": "npx hardhat verify",
+    "deploy": "npx hardhat run deploy.js",
+    "checklist": "npx hardhat run scripts/deployment-checklist.js",
+    "initialize": "npx hardhat run scripts/initialize-contracts.js",
+    "prepare:listing": "npx hardhat run scripts/prepare-dex-listing.js",
+    "test:deployment": "npx hardhat run scripts/test-deployment.js",
+    "check:env": "npx hardhat run scripts/check-environment.js",
+    "track:deployment": "npx hardhat run scripts/track-deployment.js",
+    "generate:report": "npx hardhat run scripts/generate-report.js",
+    "cleanup:deployment": "npx hardhat run scripts/cleanup-deployment.js",
+    "reset:environment": "npx hardhat run scripts/reset-environment.js",
+    "validate:config": "npx hardhat run scripts/validate-config.js",
+    "backup:deployment": "npx hardhat run scripts/backup-deployment.js",
+    "restore:deployment": "node scripts/restore-deployment.js"
+  },
+  "keywords": [
+    "solidity",
+    "ethereum",
+    "smart-contracts",
+    "deflationary-token"
+  ],
+  "author": "P-Project Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.0.0",
+    "@nomiclabs/hardhat-etherscan": "^3.0.0",
+    "@nomiclabs/hardhat-waffle": "^2.0.0",
+    "chai": "^4.2.0",
+    "ethereum-waffle": "^3.0.0",
+    "ethers": "^5.0.0",
+    "hardhat": "^2.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^10.0.0"
+  }
+}

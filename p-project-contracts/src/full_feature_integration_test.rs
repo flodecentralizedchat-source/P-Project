@@ -4,6 +4,8 @@ use crate::token::PProjectToken;
 use crate::treasury::{LiquidityMiningProgram, Treasury};
 use crate::vesting::VestingContract;
 use chrono::Utc;
+use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 
 #[test]
 fn test_full_tokenomics_implementation() {
@@ -69,10 +71,10 @@ fn test_full_tokenomics_implementation() {
 
     // Verify staking info
     let staker1_info = staking_contract.get_staking_info("staker1").unwrap();
-    assert_eq!(staker1_info.amount, 100000.0);
+    assert_eq!(staker1_info.amount, Decimal::from(100000));
 
     let staker2_info = staking_contract.get_staking_info("staker2").unwrap();
-    assert_eq!(staker2_info.amount, 200000.0);
+    assert_eq!(staker2_info.amount, Decimal::from(200000));
 
     // Test 3: Community Incentive Distribution
     println!("Testing Community Incentive Distribution...");
@@ -88,7 +90,7 @@ fn test_full_tokenomics_implementation() {
     // Verify airdrop status
     let airdrop_status = airdrop_contract.get_status();
     assert_eq!(airdrop_status.total_recipients, 3);
-    assert_eq!(airdrop_status.distributed_amount, 45000.0);
+    assert_eq!(airdrop_status.distributed_amount, Decimal::from(45000));
 
     // Test 4: DAO-controlled Allocations
     println!("Testing DAO-controlled Allocations...");
@@ -272,7 +274,7 @@ fn test_full_tokenomics_implementation() {
     let provider_staking = staking_contract
         .get_staking_info("service_provider")
         .unwrap();
-    assert_eq!(provider_staking.amount, 5000.0);
+    assert_eq!(provider_staking.amount, Decimal::from(5000));
 
     println!("All features tested successfully!");
 

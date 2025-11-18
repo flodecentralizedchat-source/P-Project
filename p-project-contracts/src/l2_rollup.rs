@@ -206,7 +206,7 @@ impl L2Rollup {
 
         let block = L2Block {
             block_number: self.latest_block_number,
-            transactions: self.pending_transactions.clone(),
+            transactions: transactions.clone(),
             state_root: state_root_after.clone(),
             previous_block_hash: self.get_latest_block_hash(),
             timestamp: Utc::now().naive_utc(),
@@ -279,7 +279,7 @@ impl L2Rollup {
 
         let batch = L2Batch {
             batch_id: batch_id.clone(),
-            transactions: self.pending_transactions.clone(),
+            transactions: transactions.clone(),
             state_root_before,
             state_root_after: state_root_after.clone(),
             timestamp: Utc::now().naive_utc(),

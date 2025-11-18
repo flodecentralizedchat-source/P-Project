@@ -79,6 +79,13 @@ services:
     pull_policy: build
     env_file:
       - .env
+    # The relayer reads multi-EVM config from .env:
+    #   EVM_NETWORKS=ethereum,polygon,bsc,arbitrum,optimism
+    #   EVM_<NAME>_RPC_URL, EVM_<NAME>_BRIDGE_ADDRESS, EVM_<NAME>_TOKEN_ADDRESS
+    # For testnets you can use, for example:
+    #   EVM_NETWORKS=sepolia,amoy,arbitrum_sepolia,optimism_sepolia
+    #   EVM_SEPOLIA_RPC_URL, EVM_AMOY_RPC_URL, EVM_ARBITRUM_SEPOLIA_RPC_URL, EVM_OPTIMISM_SEPOLIA_RPC_URL
+    # See .env.example for all entries.
     depends_on:
       mysql:
         condition: service_healthy

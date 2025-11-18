@@ -1,0 +1,9 @@
+[package]
+name = "p_project_coin"
+version = "0.0.1"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "mainnet-v1.10.0" }
+
+[addresses]
+p_project = "0x0"

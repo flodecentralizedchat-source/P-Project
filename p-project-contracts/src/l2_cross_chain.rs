@@ -48,6 +48,33 @@ impl L2CrossChainProtocol {
         }
     }
 
+    /// Compute deterministic message signature (Keccak256) from fields
+    fn compute_signature(
+        &self,
+        message_id: &str,
+        source_chain: &str,
+        destination_chain: &str,
+        sender: &str,
+        recipient: &str,
+        amount: f64,
+        token: &str,
+        payload: &[u8],
+        timestamp: u64,
+    ) -> String {
+        let mut hasher = Keccak256::new();
+        hasher.update(message_id.as_bytes());
+        hasher.update(source_chain.as_bytes());
+        hasher.update(destination_chain.as_bytes());
+        hasher.update(sender.as_bytes());
+        hasher.update(recipient.as_bytes());
+        hasher.update(&amount.to_le_bytes());
+        hasher.update(token.as_bytes());
+        hasher.update(payload);
+        hasher.update(&timestamp.to_le_bytes());
+        let result = hasher.finalize();
+        format!("{:x}", result)
+    }
+
     /// Add a connected chain
     pub fn add_connected_chain(&mut self, chain_id: String) {
         if !self.connected_chains.contains(&chain_id) {
@@ -105,8 +132,24 @@ impl L2CrossChainProtocol {
         // Lock tokens
         let lock_id = self.lock_tokens(sender.clone(), token.clone(), amount)?;
 
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let message_id = lock_id;
+        let signature = self.compute_signature(
+            &message_id,
+            &source_chain,
+            &destination_chain,
+            &sender,
+            &recipient,
+            amount,
+            &token,
+            &payload,
+            timestamp,
+        );
         let message = CrossChainMessage {
-            message_id: lock_id,
+            message_id,
             source_chain,
             destination_chain,
             sender,
@@ -114,11 +157,8 @@ impl L2CrossChainProtocol {
             amount,
             token,
             payload,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            signature: String::new(), // In a real implementation, this would be a cryptographic signature
+            timestamp,
+            signature,
         };
 
         self.bridge_state.pending_messages.push(message.clone());
@@ -219,13 +259,24 @@ impl L2CrossChainProtocol {
 
     /// Verify message integrity
     pub fn verify_message(&self, message: &CrossChainMessage) -> bool {
-        // In a real implementation, we would verify the cryptographic signature
-        // and check that the message matches the lock event on the source chain
-        // For now, we'll just do a basic validation
-
-        !message.sender.is_empty()
-            && !message.recipient.is_empty()
-            && message.amount > 0.0
-            && !message.token.is_empty()
+        if message.sender.is_empty()
+            || message.recipient.is_empty()
+            || !(message.amount > 0.0)
+            || message.token.is_empty()
+        {
+            return false;
+        }
+        let expected = self.compute_signature(
+            &message.message_id,
+            &message.source_chain,
+            &message.destination_chain,
+            &message.sender,
+            &message.recipient,
+            message.amount,
+            &message.token,
+            &message.payload,
+            message.timestamp,
+        );
+        message.signature == expected
     }
 }

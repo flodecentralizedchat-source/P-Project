@@ -1,5 +1,13 @@
 use std::env;
 
+fn upper_snake(name: &str) -> String {
+    name.trim()
+        .to_ascii_uppercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct EthConfig {
     pub rpc_url: String,
@@ -8,6 +16,28 @@ pub struct EthConfig {
     pub private_key_env: String,
     #[allow(dead_code)]
     pub confirmations: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EvmConfig {
+    pub name: String,
+    pub rpc_url: String,
+    pub bridge_address: String,
+    pub token_address: String,
+    pub private_key_env: String,
+    pub confirmations: u32,
+}
+
+impl EvmConfig {
+    pub fn to_eth_config(&self) -> EthConfig {
+        EthConfig {
+            rpc_url: self.rpc_url.clone(),
+            bridge_address: self.bridge_address.clone(),
+            token_address: self.token_address.clone(),
+            private_key_env: self.private_key_env.clone(),
+            confirmations: self.confirmations,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -31,12 +61,46 @@ pub struct SuiConfig {
 #[derive(Clone, Debug, Default)]
 pub struct BridgeConfig {
     pub eth: Option<EthConfig>,
+    pub evm: Vec<EvmConfig>,
     pub solana: Option<SolanaConfig>,
     pub sui: Option<SuiConfig>,
 }
 
 impl BridgeConfig {
     pub fn from_env() -> Self {
+        // Parse multi-EVM networks if configured
+        let evm: Vec<EvmConfig> = env
+            ::var("EVM_NETWORKS")
+            .ok()
+            .map(|list| {
+                list.split(',')
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|raw| raw.trim().to_string())
+                    .filter_map(|name| {
+                        let key = upper_snake(&name);
+                        let rpc = env::var(format!("EVM_{}_RPC_URL", key)).ok()?;
+                        let bridge = env::var(format!("EVM_{}_BRIDGE_ADDRESS", key)).ok()?;
+                        let token = env::var(format!("EVM_{}_TOKEN_ADDRESS", key)).ok()?;
+                        let pk_env = env::var(format!("EVM_{}_PRIVATE_KEY_ENV", key))
+                            .ok()
+                            .unwrap_or_else(|| "ETH_PRIVATE_KEY".to_string());
+                        let confirmations = env::var(format!("EVM_{}_CONFIRMATIONS", key))
+                            .ok()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(3u32);
+                        Some(EvmConfig {
+                            name,
+                            rpc_url: rpc,
+                            bridge_address: bridge,
+                            token_address: token,
+                            private_key_env: pk_env,
+                            confirmations,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let eth = match (
             env::var("ETH_RPC_URL").ok(),
             env::var("ETH_BRIDGE_ADDRESS").ok(),
@@ -84,6 +148,6 @@ impl BridgeConfig {
             _ => None,
         };
 
-        Self { eth, solana, sui }
+        Self { eth, evm, solana, sui }
     }
 }

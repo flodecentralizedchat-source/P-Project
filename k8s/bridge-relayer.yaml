@@ -24,29 +24,98 @@ spec:
                 secretKeyRef:
                   name: p-project-secrets
                   key: DATABASE_URL
-            # Ethereum (optional)
-            - name: ETH_RPC_URL
+            # Multi-EVM configuration
+            - name: EVM_NETWORKS
               valueFrom:
                 secretKeyRef:
                   name: p-project-bridge-secrets
-                  key: ETH_RPC_URL
-            - name: ETH_BRIDGE_ADDRESS
+                  key: EVM_NETWORKS
+            # Ethereum
+            - name: EVM_ETHEREUM_RPC_URL
               valueFrom:
                 secretKeyRef:
                   name: p-project-bridge-secrets
-                  key: ETH_BRIDGE_ADDRESS
-            - name: ETH_TOKEN_ADDRESS
+                  key: EVM_ETHEREUM_RPC_URL
+            - name: EVM_ETHEREUM_BRIDGE_ADDRESS
               valueFrom:
                 secretKeyRef:
                   name: p-project-bridge-secrets
-                  key: ETH_TOKEN_ADDRESS
+                  key: EVM_ETHEREUM_BRIDGE_ADDRESS
+            - name: EVM_ETHEREUM_TOKEN_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_ETHEREUM_TOKEN_ADDRESS
+            # Polygon
+            - name: EVM_POLYGON_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_POLYGON_RPC_URL
+            - name: EVM_POLYGON_BRIDGE_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_POLYGON_BRIDGE_ADDRESS
+            - name: EVM_POLYGON_TOKEN_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_POLYGON_TOKEN_ADDRESS
+            # BSC
+            - name: EVM_BSC_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_BSC_RPC_URL
+            - name: EVM_BSC_BRIDGE_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_BSC_BRIDGE_ADDRESS
+            - name: EVM_BSC_TOKEN_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_BSC_TOKEN_ADDRESS
+            # Arbitrum
+            - name: EVM_ARBITRUM_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_ARBITRUM_RPC_URL
+            - name: EVM_ARBITRUM_BRIDGE_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_ARBITRUM_BRIDGE_ADDRESS
+            - name: EVM_ARBITRUM_TOKEN_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_ARBITRUM_TOKEN_ADDRESS
+            # Optimism
+            - name: EVM_OPTIMISM_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_OPTIMISM_RPC_URL
+            - name: EVM_OPTIMISM_BRIDGE_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_OPTIMISM_BRIDGE_ADDRESS
+            - name: EVM_OPTIMISM_TOKEN_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: p-project-bridge-secrets
+                  key: EVM_OPTIMISM_TOKEN_ADDRESS
+            # Shared private key (adapters default to ETH_PRIVATE_KEY)
             - name: ETH_PRIVATE_KEY
               valueFrom:
                 secretKeyRef:
                   name: p-project-bridge-secrets
                   key: ETH_PRIVATE_KEY
-            - name: ETH_CONFIRMATIONS
-              value: "3"
           resources:
             requests:
               cpu: "50m"

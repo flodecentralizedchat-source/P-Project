@@ -4534,10 +4534,14 @@ dependencies = [
 name = "p-project-staking"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "p-project-contracts",
  "p-project-core",
+ "rust_decimal",
  "serde",
+ "serde_json",
  "tokio",
+ "uuid 1.18.1",
 ]
 
 [[package]]

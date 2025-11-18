@@ -10,7 +10,22 @@ tokio.workspace = true
 async-trait = "0.1"
 ethers = { version = "2", default-features = false, features = ["abigen", "ws", "rustls"] }
 chrono = "0.4"
+web3 = "0.18"
+solana-client = "1.10"
+solana-sdk = "1.10"
 
 [[bin]]
 name = "p-project-bridge-relayer"
 path = "src/bin/relayer.rs"
+
+[[bin]]
+name = "eth-listener"
+path = "src/bin/eth_listener.rs"
+
+[[bin]]
+name = "solana-relayer"
+path = "src/bin/solana_relayer.rs"
+
+[[bin]]
+name = "sui-relayer"
+path = "src/bin/sui_relayer.rs"

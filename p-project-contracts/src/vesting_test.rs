@@ -1,5 +1,5 @@
 use super::vesting::{VestingContract, VestingError, VestingType};
-use chrono::Utc;
+use chrono::{Duration, Utc};
 
 #[test]
 fn test_team_vesting_schedule() {
@@ -267,4 +267,93 @@ fn test_claim_vested_tokens() {
         vesting_contract.get_claimed_tokens(),
         claimed_amount.unwrap()
     );
+}
+
+#[test]
+fn test_block_emission_vesting_claimable() {
+    let total_vesting_tokens = 2_000_000.0;
+    let mut vesting_contract = VestingContract::new(total_vesting_tokens);
+    let start_date = (Utc::now() - Duration::days(120)).naive_utc();
+
+    vesting_contract
+        .create_block_emission_vesting(
+            "block_user".to_string(),
+            500_000.0,
+            start_date,
+            1,
+            2.0,
+            2500.0,
+            VestingType::Investor,
+        )
+        .unwrap();
+
+    let claimable = vesting_contract
+        .calculate_claimable_amount("block_user")
+        .unwrap();
+    assert!(claimable > 0.0);
+}
+
+#[test]
+fn test_epoch_unlock_vesting_claimable() {
+    let total_vesting_tokens = 1_000_000.0;
+    let mut vesting_contract = VestingContract::new(total_vesting_tokens);
+    let start_date = (Utc::now() - Duration::weeks(20)).naive_utc();
+
+    vesting_contract
+        .create_epoch_unlock_vesting(
+            "epoch_user".to_string(),
+            200_000.0,
+            start_date,
+            0,
+            7 * 24 * 60 * 60,
+            5000.0,
+            VestingType::Advisor,
+        )
+        .unwrap();
+
+    let claimable = vesting_contract
+        .calculate_claimable_amount("epoch_user")
+        .unwrap();
+    assert!(claimable >= 5_000.0);
+}
+
+#[test]
+fn test_team_circuit_breaker_blocks_claims() {
+    let mut vesting_contract = VestingContract::new(5_000_000.0);
+    let start_date = (Utc::now() - Duration::days(400)).naive_utc();
+
+    vesting_contract
+        .create_team_vesting("team_user".to_string(), 1_000_000.0, start_date)
+        .unwrap();
+
+    let initial = vesting_contract
+        .calculate_claimable_amount("team_user")
+        .unwrap();
+    assert!(initial > 0.0);
+
+    vesting_contract
+        .toggle_team_circuit_breaker(
+            "team_user",
+            vec!["founder1".to_string(), "founder2".to_string()],
+            true,
+        )
+        .unwrap();
+
+    let blocked = vesting_contract
+        .calculate_claimable_amount("team_user")
+        .unwrap();
+    assert_eq!(blocked, 0.0);
+
+    vesting_contract
+        .toggle_team_circuit_breaker(
+            "team_user",
+            vec!["founder1".to_string(), "legal_representative".to_string()],
+            false,
+        )
+        .unwrap();
+
+    let resumed = vesting_contract
+        .calculate_claimable_amount("team_user")
+        .unwrap();
+    assert!(resumed > 0.0);
 }

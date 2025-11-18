@@ -10,14 +10,24 @@ mod solana;
 mod store;
 mod sui;
 
+// New modules for relayer components
+mod eth_listener;
+mod solana_relayer;
+mod sui_relayer;
+
 pub use adapter::{AdapterTxStatus, ChainAdapter};
-use config::BridgeConfig;
+use config::{BridgeConfig, EvmConfig, EthConfig};
 pub use error::BridgeError;
 use eth::EthereumAdapter;
 use relayer::Relayer;
 use solana::SolanaAdapter;
 pub use store::{BoxedBridgeError, BridgeStore};
 use sui::SuiAdapter;
+
+// Re-export the new modules
+pub use eth_listener::EthEventListener;
+pub use solana_relayer::SolanaRelayer;
+pub use sui_relayer::SuiRelayer;
 
 // Wrapper struct to implement BridgeStore for Arc<MySqlDatabase>
 struct DatabaseWrapper {
@@ -135,8 +145,19 @@ impl BridgeService {
         let mut adapters: HashMap<String, Box<dyn adapter::ChainAdapter + Send + Sync>> =
             HashMap::new();
 
-        let eth = EthereumAdapter::new(cfg.eth.as_ref());
-        adapters.insert("Ethereum".to_string(), Box::new(eth));
+        // Register EVM adapters: prefer multi-EVM list, fallback to single ETH_*
+        if !cfg.evm.is_empty() {
+            for evm_cfg in &cfg.evm {
+                let chain_name = evm_cfg.name.trim().to_string();
+                let eth_cfg: EthConfig = evm_cfg.to_eth_config();
+                let adapter = EthereumAdapter::new(Some(&eth_cfg));
+                adapters.insert(chain_name, Box::new(adapter));
+            }
+        } else {
+            // Backward-compat single Ethereum config
+            let eth = EthereumAdapter::new(cfg.eth.as_ref());
+            adapters.insert("Ethereum".to_string(), Box::new(eth));
+        }
 
         let sol = SolanaAdapter::new(cfg.solana.as_ref());
         adapters.insert("Solana".to_string(), Box::new(sol));

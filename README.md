@@ -195,6 +195,36 @@ Bridging traditional platforms with blockchain:
 - **YouTube Tips**: "Tip in PeaceCoin" functionality for content creators
 - **Messaging Bots**: Telegram and Discord bots for tipping and transactions
 
+## Ecosystem Growth Incentives
+
+- **Developer Grants**: Fund developers building on your platform.
+
+## Multi‑EVM Setup (Mainnet + Testnet)
+
+- Configure the relayer via `.env`:
+  - `EVM_NETWORKS` is a comma‑separated list (case‑insensitive, no spaces).
+    - Mainnet example: `ethereum,polygon,bsc,arbitrum,optimism`
+    - Testnet example: `sepolia,amoy,arbitrum_sepolia,optimism_sepolia`
+  - For each `<NAME>` in the list, set:
+    - `EVM_<NAME>_RPC_URL`, `EVM_<NAME>_BRIDGE_ADDRESS`, `EVM_<NAME>_TOKEN_ADDRESS`
+  - Adapters default to `ETH_PRIVATE_KEY`; override per network using `EVM_<NAME>_PRIVATE_KEY_ENV`.
+
+- Hardhat networks (contracts):
+  - Mainnet: `mainnet`, `polygon`, `arbitrum`, `optimism` (plus `bsc`/`bscTestnet` provided).
+  - Testnet: `sepolia`, `amoy`, `arbitrumSepolia`, `optimismSepolia`.
+  - Set RPC envs: `SEPOLIA_URL`, `AMOY_URL`, `ARBITRUM_SEPOLIA_URL`, `OPTIMISM_SEPOLIA_URL`.
+  - Deploy examples:
+    - `npx hardhat run --network sepolia scripts/deploy.js`
+    - `npx hardhat run --network amoy scripts/deploy.js`
+
+- Docker Compose:
+  - `docker compose up -d` uses `.env`. See `.env.example` for full entries.
+
+- Kubernetes:
+  - Update `k8s/secrets.example.yaml` with `EVM_NETWORKS` and per‑network vars; apply secrets then deploy `k8s/bridge-relayer.yaml`.
+- **Liquidity Incentives**: Provide ongoing rewards for liquidity providers.
+- **Merchant Adoption Programs**: Incentivize businesses to accept your token as payment.
+
 ## 🌐 Web Interface
 
 Our WebAssembly-powered frontend provides:
@@ -253,6 +283,15 @@ Join our vibrant community:
 - **Telegram**: [P-Project Community](https://t.me/PProject)
 - **Discord**: [P-Project Server](https://discord.gg/PProject)
 - **Reddit**: [r/PProject](https://reddit.com/r/PProject)
+
+## Marketing & Community Controls
+
+Marketing budgets and community programs are enforced on-chain and via the Rust services:
+- **Marketing Budget (5% supply)**: Tracks user-growth spend, schedules content, and enforces caps.
+- **Community Rewards (2% supply)**: Gamified rewards ledger for early adopters, protected from over-distribution.
+- **Organic Marketing**: Logs community-persistent initiatives and prioritizes long-term trust.
+- **Influencer Strategy**: Supports low-cost micro-influencer campaigns with budget approvals.
+- **Community DAO Fund**: Proposals can request funds and only pass if there is quorum and DAO budget remains.
 
 ## 📈 Roadmap
 

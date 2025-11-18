@@ -10,6 +10,7 @@ pub enum StablePoolError {
     UserNotInPool,
     InvalidDuration,
     InvalidAmplification,
+    LiquidityLocked,
 }
 
 impl fmt::Display for StablePoolError {
@@ -20,6 +21,7 @@ impl fmt::Display for StablePoolError {
             StablePoolError::UserNotInPool => write!(f, "User not in pool"),
             StablePoolError::InvalidDuration => write!(f, "Invalid duration specified"),
             StablePoolError::InvalidAmplification => write!(f, "Amplification must be >= 1.0"),
+            StablePoolError::LiquidityLocked => write!(f, "Liquidity is locked"),
         }
     }
 }
@@ -154,6 +156,13 @@ impl StableLiquidityPool {
             .get(user_id)
             .ok_or(StablePoolError::UserNotInPool)?
             .clone();
+
+        // Enforce time-based liquidity locking based on the position's duration
+        let now = Utc::now().naive_utc();
+        let lock_end = position.start_time + chrono::Duration::days(position.duration_days.max(0));
+        if now < lock_end {
+            return Err(StablePoolError::LiquidityLocked);
+        }
 
         let liquidity_ratio = position.liquidity_amount / self.total_liquidity;
         let token_a_return = self.total_token_a * liquidity_ratio;

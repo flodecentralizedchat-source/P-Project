@@ -68,4 +68,35 @@ mod tests {
         let (ra, rb) = sp.get_reserves();
         assert!(ra > 100000.0 && rb < 100000.0);
     }
+
+    #[test]
+    fn test_stable_pool_liquidity_lock() {
+        let mut sp = StableLiquidityPool::new(
+            "pcoin_usdc_stable".to_string(),
+            "P-COIN".to_string(),
+            "USDC".to_string(),
+            0.0005,
+            50.0,
+            "REWARD".to_string(),
+            100000.0,
+            0.10,
+        )
+        .unwrap();
+
+        sp.add_liquidity("lp1".to_string(), 10_000.0, 10_000.0, 30)
+            .unwrap();
+
+        // Removing immediately should be blocked by lock
+        let locked = sp.remove_liquidity("lp1");
+        assert!(locked.is_err());
+
+        // Fast-forward by adjusting start_time to past lock
+        {
+            let pos = sp.positions.get_mut("lp1").unwrap();
+            pos.start_time = pos.start_time - chrono::Duration::days(pos.duration_days + 1);
+        }
+
+        let ok = sp.remove_liquidity("lp1");
+        assert!(ok.is_ok());
+    }
 }

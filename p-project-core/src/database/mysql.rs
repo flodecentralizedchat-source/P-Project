@@ -1,8 +1,16 @@
 use chrono::{NaiveDateTime, Utc};
+use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use sqlx::MySqlPool;
 use sqlx::Row;
 use std::fmt;
+use uuid::Uuid;
+
+use crate::budget_alternatives::{BudgetAlternative, BudgetStrategy};
+use crate::models::{
+    LearningActivityType, LearningCompletion, LearningContent, LearningContentType, TransactionType,
+};
+use crate::utils::generate_id;
 
 pub struct MySqlDatabase {
     pool: MySqlPool,
@@ -15,6 +23,8 @@ pub enum BalanceError {
     StakeNotFound,
     UserNotFound,
     InvalidAmount,
+    AlreadyCompleted,
+    LearningContentNotFound,
 }
 
 impl From<sqlx::Error> for BalanceError {
@@ -31,6 +41,8 @@ impl fmt::Display for BalanceError {
             BalanceError::StakeNotFound => write!(f, "stake_not_found"),
             BalanceError::UserNotFound => write!(f, "user_not_found"),
             BalanceError::InvalidAmount => write!(f, "invalid_amount"),
+            BalanceError::AlreadyCompleted => write!(f, "already_completed"),
+            BalanceError::LearningContentNotFound => write!(f, "learning_content_not_found"),
         }
     }
 }
@@ -250,6 +262,114 @@ impl MySqlDatabase {
             CREATE TABLE IF NOT EXISTS airdrop_states (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 state_data JSON NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create learning_content table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS learning_content (
+                id VARCHAR(255) PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                description TEXT NOT NULL,
+                content_type VARCHAR(64) NOT NULL,
+                reward_tokens DECIMAL(18, 8) NOT NULL,
+                reward_points INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create learning_completions table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS learning_completions (
+                id VARCHAR(255) PRIMARY KEY,
+                user_id VARCHAR(255) NOT NULL,
+                content_id VARCHAR(255) NOT NULL,
+                activity_type VARCHAR(64) NOT NULL,
+                reward_tokens DECIMAL(18, 8) NOT NULL,
+                reward_points INT NOT NULL,
+                proof_reference VARCHAR(255) NULL,
+                completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_user_content (user_id, content_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (content_id) REFERENCES learning_content(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create referral_codes table (one code per user, code unique)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS referral_codes (
+                code VARCHAR(64) PRIMARY KEY,
+                user_id VARCHAR(255) UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create referrals table (each referred user may only be referred once)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS referrals (
+                id VARCHAR(255) PRIMARY KEY,
+                referrer_user_id VARCHAR(255) NOT NULL,
+                referred_user_id VARCHAR(255) UNIQUE NOT NULL,
+                code VARCHAR(64) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (referrer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (referred_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (code) REFERENCES referral_codes(code) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create community events table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS events (
+                id VARCHAR(255) PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                description TEXT NOT NULL,
+                event_type VARCHAR(64) NOT NULL,
+                scheduled_start TIMESTAMP NOT NULL,
+                scheduled_end TIMESTAMP NULL,
+                link VARCHAR(255) NULL,
+                created_by VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create budget alternatives table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS budget_alternatives (
+                id VARCHAR(255) PRIMARY KEY,
+                option_name VARCHAR(255) NOT NULL,
+                details TEXT NOT NULL,
+                strategy VARCHAR(64) NOT NULL,
+                start_amount DECIMAL(18, 8) NOT NULL,
+                growth_rate DECIMAL(9, 8) NOT NULL,
+                duration_months INT NOT NULL DEFAULT 12,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             "#,
@@ -535,6 +655,621 @@ impl MySqlDatabase {
             let available: Decimal = row.get("available_balance");
             let staked: Decimal = row.get("staked_balance");
             Ok(Some((available, staked)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // ---------------- Learning (Quests) ----------------
+    pub async fn register_learning_content(
+        &self,
+        content_id: &str,
+        title: &str,
+        description: &str,
+        content_type: LearningContentType,
+        reward_tokens: Decimal,
+        reward_points: i64,
+    ) -> Result<LearningContent, sqlx::Error> {
+        let content_type_str = match content_type {
+            LearningContentType::Course => "Course",
+            LearningContentType::Quiz => "Quiz",
+            LearningContentType::Workshop => "Workshop",
+        };
+        sqlx::query(
+            r#"INSERT INTO learning_content (id, title, description, content_type, reward_tokens, reward_points)
+               VALUES (?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(content_id)
+        .bind(title)
+        .bind(description)
+        .bind(content_type_str)
+        .bind(reward_tokens)
+        .bind(reward_points)
+        .execute(&self.pool)
+        .await?;
+
+        let row = sqlx::query(
+            r#"SELECT id, title, description, content_type, reward_tokens, reward_points, created_at
+               FROM learning_content WHERE id = ?"#,
+        )
+        .bind(content_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(LearningContent {
+            id: row.get("id"),
+            title: row.get("title"),
+            description: row.get("description"),
+            content_type: match row.get::<String, _>("content_type").as_str() {
+                "Course" => LearningContentType::Course,
+                "Quiz" => LearningContentType::Quiz,
+                _ => LearningContentType::Workshop,
+            },
+            reward_tokens: row.get("reward_tokens"),
+            reward_points: row.get("reward_points"),
+            created_at: row.get("created_at"),
+        })
+    }
+
+    pub async fn list_learning_content(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<LearningContent>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"SELECT id, title, description, content_type, reward_tokens, reward_points, created_at
+               FROM learning_content ORDER BY created_at DESC LIMIT ?"#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(LearningContent {
+                id: row.get("id"),
+                title: row.get("title"),
+                description: row.get("description"),
+                content_type: match row.get::<String, _>("content_type").as_str() {
+                    "Course" => LearningContentType::Course,
+                    "Quiz" => LearningContentType::Quiz,
+                    _ => LearningContentType::Workshop,
+                },
+                reward_tokens: row.get("reward_tokens"),
+                reward_points: row.get("reward_points"),
+                created_at: row.get("created_at"),
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn get_learning_content(
+        &self,
+        content_id: &str,
+    ) -> Result<Option<LearningContent>, sqlx::Error> {
+        if let Some(row) = sqlx::query(
+            r#"SELECT id, title, description, content_type, reward_tokens, reward_points, created_at
+               FROM learning_content WHERE id = ?"#,
+        )
+        .bind(content_id)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            Ok(Some(LearningContent {
+                id: row.get("id"),
+                title: row.get("title"),
+                description: row.get("description"),
+                content_type: match row.get::<String, _>("content_type").as_str() {
+                    "Course" => LearningContentType::Course,
+                    "Quiz" => LearningContentType::Quiz,
+                    _ => LearningContentType::Workshop,
+                },
+                reward_tokens: row.get("reward_tokens"),
+                reward_points: row.get("reward_points"),
+                created_at: row.get("created_at"),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn record_learning_completion(
+        &self,
+        completion_id: &str,
+        user_id: &str,
+        content_id: &str,
+        proof_reference: Option<&str>,
+        reward_source: Option<&str>,
+    ) -> Result<LearningCompletion, BalanceError> {
+        // Ensure content exists
+        let content_row = sqlx::query(
+            r#"SELECT id, reward_tokens, reward_points FROM learning_content WHERE id = ?"#,
+        )
+        .bind(content_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        let Some(content_row) = content_row else {
+            return Err(BalanceError::LearningContentNotFound);
+        };
+
+        // Check if already completed
+        let exists = sqlx::query(
+            r#"SELECT 1 FROM learning_completions WHERE user_id = ? AND content_id = ?"#,
+        )
+        .bind(user_id)
+        .bind(content_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(BalanceError::Sql)?
+        .is_some();
+
+        if exists {
+            return Err(BalanceError::AlreadyCompleted);
+        }
+
+        let reward_tokens: Decimal = content_row.get("reward_tokens");
+        let reward_points: i64 = content_row.get("reward_points");
+
+        // Start a transaction for atomicity
+        let mut tx = self.pool.begin().await.map_err(BalanceError::Sql)?;
+
+        // Insert completion record
+        sqlx::query(
+            r#"INSERT INTO learning_completions
+                (id, user_id, content_id, activity_type, reward_tokens, reward_points, proof_reference)
+               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(completion_id)
+        .bind(user_id)
+        .bind(content_id)
+        .bind("CourseCompletion")
+        .bind(reward_tokens)
+        .bind(reward_points)
+        .bind(proof_reference)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Ensure balance row exists
+        sqlx::query(
+            "INSERT INTO balances (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Credit reward tokens to user
+        sqlx::query(
+            "UPDATE balances SET available_balance = available_balance + ? WHERE user_id = ?",
+        )
+        .bind(reward_tokens)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Record transaction for reward
+        let tx_id = generate_id();
+        let from_user = reward_source.unwrap_or("system");
+        let tx_type = "reward";
+        sqlx::query(
+            r#"INSERT INTO transactions (id, from_user_id, to_user_id, amount, transaction_type)
+               VALUES (?, ?, ?, ?, ?)"#,
+        )
+        .bind(&tx_id)
+        .bind(from_user)
+        .bind(user_id)
+        .bind(reward_tokens)
+        .bind(tx_type)
+        .execute(&mut *tx)
+        .await
+        .map_err(BalanceError::Sql)?;
+
+        // Referral bonus: credit 5% to referrer if exists
+        let referrer_row =
+            sqlx::query(r#"SELECT referrer_user_id FROM referrals WHERE referred_user_id = ?"#)
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(BalanceError::Sql)?;
+
+        if let Some(row) = referrer_row {
+            let referrer_id: String = row.get("referrer_user_id");
+            // Ensure balance row exists
+            sqlx::query(
+                "INSERT INTO balances (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id",
+            )
+            .bind(&referrer_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(BalanceError::Sql)?;
+
+            // 5% bonus
+            let bonus =
+                reward_tokens * rust_decimal::Decimal::from_f64(0.05).unwrap_or(Decimal::ZERO);
+            if bonus > Decimal::ZERO {
+                sqlx::query(
+                    "UPDATE balances SET available_balance = available_balance + ? WHERE user_id = ?",
+                )
+                .bind(bonus)
+                .bind(&referrer_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(BalanceError::Sql)?;
+
+                let bonus_tx_id = generate_id();
+                sqlx::query(
+                    r#"INSERT INTO transactions (id, from_user_id, to_user_id, amount, transaction_type)
+                       VALUES (?, ?, ?, ?, ?)"#,
+                )
+                .bind(&bonus_tx_id)
+                .bind("referral_bonus")
+                .bind(&referrer_id)
+                .bind(bonus)
+                .bind("reward")
+                .execute(&mut *tx)
+                .await
+                .map_err(BalanceError::Sql)?;
+            }
+        }
+
+        // Commit transaction
+        tx.commit().await.map_err(BalanceError::Sql)?;
+
+        Ok(LearningCompletion {
+            id: completion_id.to_string(),
+            user_id: user_id.to_string(),
+            content_id: content_id.to_string(),
+            activity_type: LearningActivityType::CourseCompletion,
+            reward_tokens,
+            reward_points,
+            proof_reference: proof_reference.map(|s| s.to_string()),
+            completed_at: chrono::Utc::now().naive_utc(),
+        })
+    }
+
+    pub async fn list_user_learning_completions(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<LearningCompletion>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"SELECT id, user_id, content_id, activity_type, reward_tokens, reward_points, proof_reference, completed_at
+               FROM learning_completions WHERE user_id = ? ORDER BY completed_at DESC LIMIT ?"#,
+        )
+        .bind(user_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(LearningCompletion {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                content_id: row.get("content_id"),
+                activity_type: match row.get::<String, _>("activity_type").as_str() {
+                    "CourseCompletion" => LearningActivityType::CourseCompletion,
+                    "QuizCompletion" => LearningActivityType::QuizCompletion,
+                    _ => LearningActivityType::WorkshopParticipation,
+                },
+                reward_tokens: row.get("reward_tokens"),
+                reward_points: row.get("reward_points"),
+                proof_reference: row.get("proof_reference"),
+                completed_at: row.get("completed_at"),
+            });
+        }
+        Ok(out)
+    }
+
+    // ---------------- Referrals ----------------
+    pub async fn upsert_referral_code(&self, user_id: &str) -> Result<String, sqlx::Error> {
+        // If already exists, return it
+        if let Some(row) = sqlx::query("SELECT code FROM referral_codes WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?
+        {
+            let code: String = row.get("code");
+            return Ok(code);
+        }
+
+        // Generate unique code and insert
+        for _ in 0..5 {
+            let code = Uuid::new_v4()
+                .to_string()
+                .chars()
+                .take(8)
+                .collect::<String>()
+                .to_uppercase();
+            let res = sqlx::query("INSERT INTO referral_codes (code, user_id) VALUES (?, ?)")
+                .bind(&code)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await;
+            match res {
+                Ok(_) => return Ok(code),
+                Err(e) => {
+                    // On duplicate, retry
+                    if let sqlx::Error::Database(db_err) = &e {
+                        if db_err.code().map(|c| c.to_string()) == Some("23000".into()) {
+                            continue;
+                        }
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        // Fallback one more time without checking
+        let code = Uuid::new_v4()
+            .to_string()
+            .chars()
+            .take(8)
+            .collect::<String>()
+            .to_uppercase();
+        sqlx::query("INSERT INTO referral_codes (code, user_id) VALUES (?, ?)")
+            .bind(&code)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(code)
+    }
+
+    pub async fn get_referral_code(&self, user_id: &str) -> Result<Option<String>, sqlx::Error> {
+        Ok(
+            sqlx::query("SELECT code FROM referral_codes WHERE user_id = ?")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .map(|row| row.get("code")),
+        )
+    }
+
+    pub async fn accept_referral(
+        &self,
+        code: &str,
+        referred_user_id: &str,
+    ) -> Result<(), BalanceError> {
+        // Resolve referrer by code
+        let row = sqlx::query("SELECT user_id FROM referral_codes WHERE code = ?")
+            .bind(code)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(BalanceError::Sql)?;
+
+        let Some(row) = row else {
+            return Err(BalanceError::UserNotFound);
+        };
+        let referrer_user_id: String = row.get("user_id");
+        if referrer_user_id == referred_user_id {
+            return Err(BalanceError::InvalidAmount);
+        }
+
+        // Insert if not already referred
+        let exists = sqlx::query("SELECT 1 FROM referrals WHERE referred_user_id = ?")
+            .bind(referred_user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(BalanceError::Sql)?
+            .is_some();
+        if exists {
+            return Ok(());
+        }
+
+        let id = generate_id();
+        sqlx::query(
+            "INSERT INTO referrals (id, referrer_user_id, referred_user_id, code) VALUES (?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(referrer_user_id)
+        .bind(referred_user_id)
+        .bind(code)
+        .execute(&self.pool)
+        .await
+        .map_err(BalanceError::Sql)?;
+        Ok(())
+    }
+
+    pub async fn get_referral_stats(&self, user_id: &str) -> Result<i64, sqlx::Error> {
+        let row = sqlx::query("SELECT COUNT(*) AS cnt FROM referrals WHERE referrer_user_id = ?")
+            .bind(user_id)
+            .fetch_one(&self.pool)
+            .await?;
+        let cnt: i64 = row.get("cnt");
+        Ok(cnt)
+    }
+
+    // ---------------- Community Events (AMAs & Events) ----------------
+    pub async fn create_event(
+        &self,
+        id: &str,
+        title: &str,
+        description: &str,
+        event_type: &str,
+        scheduled_start: chrono::NaiveDateTime,
+        scheduled_end: Option<chrono::NaiveDateTime>,
+        link: Option<&str>,
+        created_by: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"INSERT INTO events (id, title, description, event_type, scheduled_start, scheduled_end, link, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(id)
+        .bind(title)
+        .bind(description)
+        .bind(event_type)
+        .bind(scheduled_start)
+        .bind(scheduled_end)
+        .bind(link)
+        .bind(created_by)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_events(
+        &self,
+        limit: i64,
+    ) -> Result<
+        Vec<(
+            String,
+            String,
+            String,
+            String,
+            chrono::NaiveDateTime,
+            Option<chrono::NaiveDateTime>,
+            Option<String>,
+            String,
+            chrono::NaiveDateTime,
+        )>,
+        sqlx::Error,
+    > {
+        let rows = sqlx::query(
+            r#"SELECT id, title, description, event_type, scheduled_start, scheduled_end, link, created_by, created_at
+               FROM events ORDER BY scheduled_start DESC LIMIT ?"#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push((
+                row.get("id"),
+                row.get("title"),
+                row.get("description"),
+                row.get("event_type"),
+                row.get("scheduled_start"),
+                row.get("scheduled_end"),
+                row.get("link"),
+                row.get("created_by"),
+                row.get("created_at"),
+            ));
+        }
+        Ok(out)
+    }
+
+    pub async fn get_event(
+        &self,
+        id: &str,
+    ) -> Result<
+        Option<(
+            String,
+            String,
+            String,
+            String,
+            chrono::NaiveDateTime,
+            Option<chrono::NaiveDateTime>,
+            Option<String>,
+            String,
+            chrono::NaiveDateTime,
+        )>,
+        sqlx::Error,
+    > {
+        if let Some(row) = sqlx::query(
+            r#"SELECT id, title, description, event_type, scheduled_start, scheduled_end, link, created_by, created_at
+               FROM events WHERE id = ?"#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            Ok(Some((
+                row.get("id"),
+                row.get("title"),
+                row.get("description"),
+                row.get("event_type"),
+                row.get("scheduled_start"),
+                row.get("scheduled_end"),
+                row.get("link"),
+                row.get("created_by"),
+                row.get("created_at"),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // ---------------- Budget Alternatives ----------------
+    pub async fn create_budget_alternative(
+        &self,
+        id: &str,
+        option_name: &str,
+        details: &str,
+        strategy: BudgetStrategy,
+        start_amount: Decimal,
+        growth_rate: Decimal,
+        duration_months: i64,
+    ) -> Result<BudgetAlternative, sqlx::Error> {
+        sqlx::query(
+            r#"INSERT INTO budget_alternatives (id, option_name, details, strategy, start_amount, growth_rate, duration_months)
+               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(id)
+        .bind(option_name)
+        .bind(details)
+        .bind(strategy.as_str())
+        .bind(start_amount)
+        .bind(growth_rate)
+        .bind(duration_months)
+        .execute(&self.pool)
+        .await?;
+
+        let alternative = self.get_budget_alternative(id).await?;
+        alternative.ok_or(sqlx::Error::RowNotFound)
+    }
+
+    pub async fn list_budget_alternatives(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<BudgetAlternative>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"SELECT id, option_name, details, strategy, start_amount, growth_rate, duration_months, created_at
+               FROM budget_alternatives ORDER BY created_at DESC LIMIT ?"#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(BudgetAlternative {
+                id: row.get("id"),
+                option_name: row.get("option_name"),
+                details: row.get("details"),
+                strategy: BudgetStrategy::from_str(&row.get::<String, _>("strategy")),
+                start_amount: row.get("start_amount"),
+                growth_rate: row.get("growth_rate"),
+                duration_months: row.get("duration_months"),
+                created_at: row.get("created_at"),
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn get_budget_alternative(
+        &self,
+        id: &str,
+    ) -> Result<Option<BudgetAlternative>, sqlx::Error> {
+        if let Some(row) = sqlx::query(
+            r#"SELECT id, option_name, details, strategy, start_amount, growth_rate, duration_months, created_at
+               FROM budget_alternatives WHERE id = ?"#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            Ok(Some(BudgetAlternative {
+                id: row.get("id"),
+                option_name: row.get("option_name"),
+                details: row.get("details"),
+                strategy: BudgetStrategy::from_str(&row.get::<String, _>("strategy")),
+                start_amount: row.get("start_amount"),
+                growth_rate: row.get("growth_rate"),
+                duration_months: row.get("duration_months"),
+                created_at: row.get("created_at"),
+            }))
         } else {
             Ok(None)
         }

@@ -14,3 +14,9 @@ The API exposes `/tokenomics/summary` (public). It parses the CSV into structure
 3. Feed the price targets into visualizations (`market_cap` is calculated automatically from the total supply).
 
 Set `TOKENOMICS_CSV_PATH` to point at a different CSV if you maintain updated variants.
+
+Additionally, the API exposes `/strategy/exchange-listings` (public), which derives a structured
+"Exchange Listings" plan from the CSV (or falls back to sensible defaults):
+- DEX strategy: Uniswap, PancakeSwap, Raydium (permissionless; no listing fees)
+- CEX progression: phased approach post-DEX credibility with example venues
+- Market makers: objectives and baseline guidance for liquidity and spreads

@@ -153,3 +153,110 @@ pub struct BridgeTx {
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
+
+// Community Events (AMAs & Events)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum EventType {
+    AMA,
+    CommunityEvent,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Event {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub event_type: EventType,
+    pub scheduled_start: chrono::NaiveDateTime,
+    pub scheduled_end: Option<chrono::NaiveDateTime>,
+    pub link: Option<String>,
+    pub created_by: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+// Referrals
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferralCode {
+    pub code: String,
+    pub user_id: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferralRelation {
+    pub id: String,
+    pub referrer_user_id: String,
+    pub referred_user_id: String,
+    pub code: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+// Innovation Models: Partners, Ecosystem, UVPs
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PartnerIntegrationType {
+    Payment,
+    Oracle,
+    Identity,
+    Messaging,
+    ECommerce,
+    CarbonCredits,
+    DeFi,
+    NFT,
+    Analytics,
+    Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Partner {
+    pub id: String,
+    pub name: String,
+    pub integration_type: PartnerIntegrationType,
+    pub metadata: serde_json::Value,
+    pub webhook_secret: Option<String>,
+    pub active: bool,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum EcosystemComponentType {
+    Service,
+    Contract,
+    API,
+    UI,
+    Bot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ComponentStatus {
+    Healthy,
+    Degraded,
+    Down,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcosystemComponent {
+    pub id: String,
+    pub name: String,
+    pub component_type: EcosystemComponentType,
+    pub version: String,
+    pub status: ComponentStatus,
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EcosystemLink {
+    pub from_id: String,
+    pub to_id: String,
+    pub relation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniqueValueProposition {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub metric_key: String,
+    pub multiplier: f64,
+}

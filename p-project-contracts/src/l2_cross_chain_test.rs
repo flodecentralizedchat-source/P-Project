@@ -254,4 +254,74 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(protocol.bridge_state.pending_messages.len(), 0);
     }
+
+    #[test]
+    fn test_verify_message_signature() {
+        let config = RollupConfig {
+            chain_id: "test-chain".to_string(),
+            operator_address: "operator1".to_string(),
+            batch_submission_interval: 300,
+            max_batch_size: 100,
+            gas_price: 0.001,
+        };
+
+        let mut rollup = L2Rollup::new(config);
+        rollup.initialize_account("user1".to_string(), 1000.0);
+
+        let mut protocol = L2CrossChainProtocol::new(rollup, "test-chain".to_string());
+        protocol.add_connected_chain("ethereum".to_string());
+
+        let msg = protocol
+            .create_cross_chain_message(
+                "test-chain".to_string(),
+                "ethereum".to_string(),
+                "user1".to_string(),
+                "user2".to_string(),
+                42.0,
+                "P".to_string(),
+                vec![9, 9, 9],
+            )
+            .expect("message creation should succeed");
+
+        assert!(protocol.verify_message(&msg));
+
+        let mut bad = msg.clone();
+        bad.signature = "deadbeef".to_string();
+        assert!(!protocol.verify_message(&bad));
+    }
+
+    #[test]
+    fn test_replay_attack_prevention() {
+        let config = RollupConfig {
+            chain_id: "test-chain".to_string(),
+            operator_address: "operator1".to_string(),
+            batch_submission_interval: 300,
+            max_batch_size: 100,
+            gas_price: 0.001,
+        };
+
+        let rollup = L2Rollup::new(config);
+        let mut protocol = L2CrossChainProtocol::new(rollup, "test-chain".to_string());
+
+        let message = CrossChainMessage {
+            message_id: "replay-test".to_string(),
+            source_chain: "ethereum".to_string(),
+            destination_chain: "test-chain".to_string(),
+            sender: "user1".to_string(),
+            recipient: "user2".to_string(),
+            amount: 10.0,
+            token: "P".to_string(),
+            payload: vec![],
+            timestamp: 1,
+            signature: "sig".to_string(),
+        };
+
+        // First time should pass
+        assert!(protocol.process_incoming_message(message.clone()).is_ok());
+        // Second time should be rejected
+        assert_eq!(
+            protocol.process_incoming_message(message),
+            Err(super::super::l2_rollup::RollupError::InvalidTransaction)
+        );
+    }
 }

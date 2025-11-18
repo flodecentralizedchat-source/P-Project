@@ -4,6 +4,8 @@ use crate::StakingContract;
 mod tests {
     use super::*;
     use chrono::Utc;
+    use rust_decimal::prelude::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_projected_rewards_calculation() {
@@ -145,7 +147,7 @@ mod tests {
         assert!(bonus.is_some());
         let bonus = bonus.unwrap();
         assert_eq!(bonus.user_id, user_id);
-        assert_eq!(bonus.total_bonus_earned, 0.0); // Not calculated yet
+        assert_eq!(bonus.total_bonus_earned, Decimal::ZERO); // Not calculated yet
     }
 
     #[test]
@@ -174,7 +176,10 @@ mod tests {
         let bonus_info = staking_contract.get_peace_staking_bonus(&user_id);
         assert!(bonus_info.is_some());
         let bonus_info = bonus_info.unwrap();
-        assert_eq!(bonus_info.total_bonus_earned, bonus_amount);
+        assert_eq!(
+            bonus_info.total_bonus_earned.to_f64().unwrap(),
+            bonus_amount
+        );
     }
 
     #[test]
@@ -216,7 +221,7 @@ mod tests {
         let bonus_info = staking_contract.get_peace_staking_bonus(&user_id);
         assert!(bonus_info.is_some());
         let bonus_info = bonus_info.unwrap();
-        assert_eq!(bonus_info.total_bonus_earned, total_bonus);
+        assert_eq!(bonus_info.total_bonus_earned.to_f64().unwrap(), total_bonus);
     }
 
     #[test]

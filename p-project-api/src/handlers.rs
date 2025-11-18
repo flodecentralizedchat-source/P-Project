@@ -1,9 +1,11 @@
 use axum::{
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
+use chrono::{NaiveDateTime, Utc};
 use p_project_bridge::BridgeService;
+use p_project_core::budget_alternatives::{BudgetAlternative, BudgetSchedulePoint, BudgetStrategy};
 use p_project_core::database::{BalanceError, MySqlDatabase};
 use p_project_core::models::{
     LearningCompletion, LearningContent, LearningContentType, Proposal, ProposalStatus, Remittance,
@@ -264,6 +266,115 @@ pub async fn whoami(
         role: c.role,
         exp: c.exp,
     }))
+}
+
+// ---------------- Innovation Features: UVP, Partnerships, Ecosystem ----------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UvpComputeResponse {
+    pub multiplier: f64,
+}
+
+pub async fn get_uvp_summary(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<p_project_core::UvpSummaryItem>>, (StatusCode, Json<ErrorResponse>)> {
+    let guard = state.uvp_engine.read().await;
+    let summary = guard.summary();
+    Ok(Json(summary))
+}
+
+pub async fn compute_uvp_multiplier(
+    State(state): State<AppState>,
+    Json(ctx): Json<serde_json::Value>,
+) -> Result<Json<UvpComputeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let guard = state.uvp_engine.read().await;
+    let m = guard.compute_reward_multiplier(&ctx);
+    Ok(Json(UvpComputeResponse { multiplier: m }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct EcosystemOverviewResponse {
+    pub components: Vec<p_project_core::EcosystemComponent>,
+    pub links: Vec<p_project_core::EcosystemLink>,
+    pub health: p_project_core::HealthSummary,
+}
+
+pub async fn get_ecosystem_overview(
+    State(state): State<AppState>,
+) -> Result<Json<EcosystemOverviewResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let g = state.ecosystem_graph.read().await;
+    let comps = g.list_components().into_iter().cloned().collect();
+    let links = g.list_links().clone();
+    let health = g.health_summary();
+    Ok(Json(EcosystemOverviewResponse {
+        components: comps,
+        links,
+        health,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterPartnerRequest {
+    pub name: String,
+    pub integration_type: String,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+    pub webhook_secret: Option<String>,
+    #[serde(default = "default_true")]
+    pub active: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn parse_integration_type(s: &str) -> Option<p_project_core::PartnerIntegrationType> {
+    use p_project_core::PartnerIntegrationType as T;
+    match s.to_ascii_lowercase().as_str() {
+        "payment" => Some(T::Payment),
+        "oracle" => Some(T::Oracle),
+        "identity" => Some(T::Identity),
+        "messaging" => Some(T::Messaging),
+        "ecommerce" => Some(T::ECommerce),
+        "carboncredits" | "carbon_credits" | "carbon" => Some(T::CarbonCredits),
+        "defi" => Some(T::DeFi),
+        "nft" => Some(T::NFT),
+        "analytics" => Some(T::Analytics),
+        "custom" => Some(T::Custom),
+        _ => None,
+    }
+}
+
+pub async fn register_partner(
+    State(state): State<AppState>,
+    Json(req): Json<RegisterPartnerRequest>,
+) -> Result<Json<p_project_core::Partner>, (StatusCode, Json<ErrorResponse>)> {
+    let Some(integration_type) = parse_integration_type(&req.integration_type) else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_integration_type".to_string(),
+            }),
+        ));
+    };
+    let mut reg = state.partner_registry.write().await;
+    let partner = reg.register_partner(
+        &req.name,
+        integration_type,
+        req.metadata,
+        req.webhook_secret,
+        req.active,
+    );
+    Ok(Json(partner))
+}
+
+pub async fn list_partners(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<p_project_core::Partner>>, (StatusCode, Json<ErrorResponse>)> {
+    let reg = state.partner_registry.read().await;
+    let mut v: Vec<_> = reg.list_partners().into_iter().cloned().collect();
+    v.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    Ok(Json(v))
 }
 
 // Users
@@ -1243,6 +1354,438 @@ pub struct AirdropRecipientResponse {
 
 pub async fn get_airdrop_recipients() -> Json<Vec<AirdropRecipientResponse>> {
     Json(Vec::new())
+}
+
+// ---------------- Referrals ----------------
+#[derive(Debug, Serialize)]
+pub struct GenerateReferralCodeResponse {
+    pub code: String,
+}
+
+pub async fn generate_referral_code(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+) -> Result<Json<GenerateReferralCodeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = &claims.sub;
+    match state.db.upsert_referral_code(user_id).await {
+        Ok(code) => Ok(Json(GenerateReferralCodeResponse { code })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AcceptReferralRequest {
+    pub code: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AcceptReferralResponse {
+    pub accepted: bool,
+}
+
+pub async fn accept_referral(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<AcceptReferralRequest>,
+) -> Result<Json<AcceptReferralResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["user", "admin"])?;
+    if claims.role.as_deref() != Some("admin") && claims.sub != req.user_id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "forbidden".to_string(),
+            }),
+        ));
+    }
+    match state.db.accept_referral(&req.code, &req.user_id).await {
+        Ok(_) => Ok(Json(AcceptReferralResponse { accepted: true })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReferralStatsResponse {
+    pub user_id: String,
+    pub referred_count: i64,
+}
+
+pub async fn get_referral_stats(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<ReferralStatsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.db.get_referral_stats(&user_id).await {
+        Ok(cnt) => Ok(Json(ReferralStatsResponse {
+            user_id,
+            referred_count: cnt,
+        })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+// ---------------- Community Events (AMAs & Events) ----------------
+#[derive(Debug, Deserialize)]
+pub struct CreateEventRequest {
+    pub title: String,
+    pub description: String,
+    pub event_type: String,      // "AMA" | "CommunityEvent" | "Other"
+    pub scheduled_start: String, // ISO8601
+    pub scheduled_end: Option<String>,
+    pub link: Option<String>,
+    pub created_by: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateEventResponse {
+    pub id: String,
+}
+
+pub async fn create_event(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<CreateEventRequest>,
+) -> Result<Json<CreateEventResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["admin"])?;
+    let id = p_project_core::utils::generate_id();
+    let start = chrono::DateTime::parse_from_rfc3339(&req.scheduled_start)
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "invalid_start".to_string(),
+                }),
+            )
+        })?
+        .naive_utc();
+    let end = match &req.scheduled_end {
+        Some(s) => Some(
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map_err(|_| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: "invalid_end".to_string(),
+                        }),
+                    )
+                })?
+                .naive_utc(),
+        ),
+        None => None,
+    };
+    state
+        .db
+        .create_event(
+            &id,
+            &req.title,
+            &req.description,
+            &req.event_type,
+            start,
+            end,
+            req.link.as_deref(),
+            &req.created_by,
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: e.to_string(),
+                }),
+            )
+        })?;
+    Ok(Json(CreateEventResponse { id }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct EventResponse {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub event_type: String,
+    pub scheduled_start: String,
+    pub scheduled_end: Option<String>,
+    pub link: Option<String>,
+    pub created_by: String,
+    pub created_at: String,
+}
+
+pub async fn list_events(
+    State(state): State<AppState>,
+    Query(query): Query<LearningContentListQuery>,
+) -> Result<Json<Vec<EventResponse>>, (StatusCode, Json<ErrorResponse>)> {
+    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    match state.db.list_events(limit).await {
+        Ok(rows) => Ok(Json(
+            rows.into_iter()
+                .map(
+                    |(
+                        id,
+                        title,
+                        description,
+                        event_type,
+                        scheduled_start,
+                        scheduled_end,
+                        link,
+                        created_by,
+                        created_at,
+                    )| EventResponse {
+                        id,
+                        title,
+                        description,
+                        event_type,
+                        scheduled_start: chrono::NaiveDateTime::and_utc(scheduled_start)
+                            .to_rfc3339(),
+                        scheduled_end: scheduled_end
+                            .map(|v| chrono::NaiveDateTime::and_utc(v).to_rfc3339()),
+                        link,
+                        created_by,
+                        created_at: chrono::NaiveDateTime::and_utc(created_at).to_rfc3339(),
+                    },
+                )
+                .collect(),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn get_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<EventResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.db.get_event(&id).await {
+        Ok(Some((
+            id,
+            title,
+            description,
+            event_type,
+            scheduled_start,
+            scheduled_end,
+            link,
+            created_by,
+            created_at,
+        ))) => Ok(Json(EventResponse {
+            id,
+            title,
+            description,
+            event_type,
+            scheduled_start: chrono::NaiveDateTime::and_utc(scheduled_start).to_rfc3339(),
+            scheduled_end: scheduled_end.map(|v| chrono::NaiveDateTime::and_utc(v).to_rfc3339()),
+            link,
+            created_by,
+            created_at: chrono::NaiveDateTime::and_utc(created_at).to_rfc3339(),
+        })),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "not_found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+// ---------------- Budget Alternatives ----------------
+#[derive(Debug, Deserialize)]
+pub struct CreateBudgetAlternativeRequest {
+    pub option_name: String,
+    pub details: String,
+    pub strategy: String,
+    pub start_amount: Decimal,
+    pub growth_rate: Decimal,
+    pub duration_months: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BudgetAlternativeResponse {
+    pub id: String,
+    pub option_name: String,
+    pub details: String,
+    pub strategy: String,
+    pub start_amount: Decimal,
+    pub growth_rate: Decimal,
+    pub duration_months: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BudgetSchedulePointResponse {
+    pub month: i64,
+    pub amount: Decimal,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BudgetSimulationRequest {
+    pub months: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BudgetSimulationResponse {
+    pub id: String,
+    pub option_name: String,
+    pub schedule: Vec<BudgetSchedulePointResponse>,
+}
+
+impl From<BudgetAlternative> for BudgetAlternativeResponse {
+    fn from(alt: BudgetAlternative) -> Self {
+        BudgetAlternativeResponse {
+            id: alt.id,
+            option_name: alt.option_name,
+            details: alt.details,
+            strategy: alt.strategy.as_str().to_string(),
+            start_amount: alt.start_amount,
+            growth_rate: alt.growth_rate,
+            duration_months: alt.duration_months,
+            created_at: chrono::DateTime::<Utc>::from_utc(alt.created_at, Utc).to_rfc3339(),
+        }
+    }
+}
+
+impl From<BudgetSchedulePoint> for BudgetSchedulePointResponse {
+    fn from(point: BudgetSchedulePoint) -> Self {
+        BudgetSchedulePointResponse {
+            month: point.month,
+            amount: point.amount,
+        }
+    }
+}
+
+pub async fn create_budget_alternative(
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::middleware::Claims>,
+    Json(req): Json<CreateBudgetAlternativeRequest>,
+) -> Result<Json<BudgetAlternativeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_roles(&claims, &["admin"])?;
+    if req.start_amount <= Decimal::ZERO {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_start_amount".to_string(),
+            }),
+        ));
+    }
+    if req.growth_rate < Decimal::ZERO {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_growth_rate".to_string(),
+            }),
+        ));
+    }
+
+    let duration = req.duration_months.unwrap_or(12).max(1);
+    let id = p_project_core::utils::generate_id();
+    match state
+        .db
+        .create_budget_alternative(
+            &id,
+            &req.option_name,
+            &req.details,
+            BudgetStrategy::from_str(&req.strategy),
+            req.start_amount.round_dp(8),
+            req.growth_rate.round_dp(8),
+            duration,
+        )
+        .await
+    {
+        Ok(result) => Ok(Json(result.into())),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn list_budget_alternatives(
+    State(state): State<AppState>,
+    Query(query): Query<LearningContentListQuery>,
+) -> Result<Json<Vec<BudgetAlternativeResponse>>, (StatusCode, Json<ErrorResponse>)> {
+    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    match state.db.list_budget_alternatives(limit).await {
+        Ok(items) => Ok(Json(items.into_iter().map(Into::into).collect())),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn get_budget_alternative(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<BudgetAlternativeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.db.get_budget_alternative(&id).await {
+        Ok(Some(item)) => Ok(Json(item.into())),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "not_found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+pub async fn simulate_budget_alternative(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<BudgetSimulationRequest>,
+) -> Result<Json<BudgetSimulationResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match state.db.get_budget_alternative(&id).await {
+        Ok(Some(item)) => {
+            let months = req.months.filter(|m| *m > 0);
+            let schedule = item.simulate_schedule(months);
+            Ok(Json(BudgetSimulationResponse {
+                id: item.id.clone(),
+                option_name: item.option_name.clone(),
+                schedule: schedule.into_iter().map(Into::into).collect(),
+            }))
+        }
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "budget_alternative_not_found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
 }
 
 // ---------------- DAO handlers ----------------
@@ -2326,6 +2869,11 @@ pub struct TokenomicsSummaryResponse {
     pub summary: p_project_core::TokenomicsSummary,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ExchangeListingsResponse {
+    pub strategy: p_project_core::ExchangeListings,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RegisterMissionRequest {
     pub mission: p_project_core::PeacefulMission,
@@ -2542,6 +3090,29 @@ pub async fn get_tokenomics_summary(
     }
 }
 
+pub async fn get_exchange_listings_strategy(
+    State(_state): State<AppState>,
+) -> Result<Json<ExchangeListingsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let path = env_tokenomics_path().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+
+    match TokenomicsService::from_path(path) {
+        Ok(service) => {
+            let strategy = p_project_core::ExchangeListings::from_tokenomics_service(&service);
+            Ok(Json(ExchangeListingsResponse { strategy }))
+        }
+        Err(_e) => {
+            // Fall back to defaults if CSV missing or malformed
+            let strategy = p_project_core::ExchangeListings::default();
+            Ok(Json(ExchangeListingsResponse { strategy }))
+        }
+    }
+}
+
 pub async fn register_mission(
     State(_state): State<AppState>,
     Extension(claims): Extension<crate::middleware::Claims>,
@@ -2631,6 +3202,47 @@ pub async fn get_player_balance(
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     pub error: String,
+}
+
+// --- Lightweight JWT helper for handlers that aren't on the auth-protected router ---
+fn parse_jwt_from_headers(
+    headers: &HeaderMap,
+) -> Result<crate::middleware::Claims, (StatusCode, Json<ErrorResponse>)> {
+    let secret = std::env::var("JWT_SECRET").map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "unauthorized".to_string(),
+            }),
+        )
+    })?;
+
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token = auth.strip_prefix("Bearer ").unwrap_or("").trim();
+    if token.is_empty() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "unauthorized".to_string(),
+            }),
+        ));
+    }
+
+    let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    let key = jsonwebtoken::DecodingKey::from_secret(secret.as_bytes());
+    let data = jsonwebtoken::decode::<crate::middleware::Claims>(token, &key, &validation)
+        .map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: "unauthorized".to_string(),
+                }),
+            )
+        })?;
+    Ok(data.claims)
 }
 
 #[derive(Debug, Serialize)]
@@ -2851,4 +3463,450 @@ pub async fn get_merchant(
     };
 
     Ok(Json(response))
+}
+
+// ---------------- Digital goods (merchant) ----------------
+#[derive(Debug, Deserialize)]
+pub struct AddDigitalGoodsProductRequest {
+    pub merchant_id: String,
+    pub product: p_project_core::merchant_service::DigitalGoodsProduct,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddDigitalGoodsProductResponse {
+    pub success: bool,
+}
+
+pub async fn add_digital_goods_product(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AddDigitalGoodsProductRequest>,
+) -> Result<Json<AddDigitalGoodsProductResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (admin typically)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let mut merchant_service =
+        p_project_core::merchant_service::MerchantService::new(merchant_config);
+
+    // For demo/tests, attempt to add; will error if merchant not present
+    match merchant_service.add_digital_goods_product(&req.merchant_id, req.product) {
+        Ok(()) => Ok(Json(AddDigitalGoodsProductResponse { success: true })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PurchaseDigitalGoodsRequest {
+    pub product_id: String,
+    pub customer_id: String,
+    pub customer_country: String,
+    pub customer_language: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PurchaseDigitalGoodsResponse {
+    pub transaction: p_project_core::merchant_service::DigitalGoodsTransaction,
+}
+
+pub async fn purchase_digital_goods(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<PurchaseDigitalGoodsRequest>,
+) -> Result<Json<PurchaseDigitalGoodsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (user)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let mut merchant_service =
+        p_project_core::merchant_service::MerchantService::new(merchant_config);
+
+    match merchant_service
+        .purchase_digital_good(
+            req.product_id,
+            req.customer_id,
+            req.customer_country,
+            req.customer_language,
+        )
+        .await
+    {
+        Ok(tx) => Ok(Json(PurchaseDigitalGoodsResponse { transaction: tx })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetDigitalGoodsTransactionRequest {
+    pub transaction_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetDigitalGoodsTransactionResponse {
+    pub transaction: Option<p_project_core::merchant_service::DigitalGoodsTransaction>,
+}
+
+pub async fn get_digital_goods_transaction(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<GetDigitalGoodsTransactionRequest>,
+) -> Result<Json<GetDigitalGoodsTransactionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (user)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let merchant_service = p_project_core::merchant_service::MerchantService::new(merchant_config);
+
+    let tx = merchant_service.get_digital_goods_transaction(&req.transaction_id);
+    Ok(Json(GetDigitalGoodsTransactionResponse {
+        transaction: tx.cloned(),
+    }))
+}
+
+// ---------------- E-commerce (Shopify/WooCommerce) ----------------
+#[derive(Debug, Deserialize)]
+pub struct CreateEcommerceIntegrationRequest {
+    pub config: p_project_core::web2_service::EcommerceConfig,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateEcommerceIntegrationResponse {
+    pub integration_id: String,
+}
+
+pub async fn create_ecommerce_integration(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<CreateEcommerceIntegrationRequest>,
+) -> Result<Json<CreateEcommerceIntegrationResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (admin)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let mut web2 = Web2Service::new(web2_config);
+    match web2.create_ecommerce_integration(req.config) {
+        Ok(integration_id) => Ok(Json(CreateEcommerceIntegrationResponse { integration_id })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProcessEcommercePaymentRequest {
+    pub payment_data: p_project_core::web2_service::EcommercePaymentRequest,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProcessEcommercePaymentResponse {
+    pub response: p_project_core::web2_service::EcommercePaymentResponse,
+}
+
+pub async fn process_ecommerce_payment(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<ProcessEcommercePaymentRequest>,
+) -> Result<Json<ProcessEcommercePaymentResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (user)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let web2 = Web2Service::new(web2_config);
+    match web2.process_ecommerce_payment(req.payment_data).await {
+        Ok(resp) => Ok(Json(ProcessEcommercePaymentResponse { response: resp })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyWebhookSignatureRequest {
+    pub platform: String, // "shopify" | "woocommerce"
+    pub body: String,
+    pub signature: String,
+    pub secret: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifyWebhookSignatureResponse {
+    pub valid: bool,
+}
+
+pub async fn verify_webhook_signature(
+    Json(req): Json<VerifyWebhookSignatureRequest>,
+) -> Result<Json<VerifyWebhookSignatureResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let web2_config = env_web2_config().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })?;
+    let web2 = Web2Service::new(web2_config);
+    let body_bytes = req.body.as_bytes();
+
+    let valid = match req.platform.as_str() {
+        "shopify" => web2.verify_shopify_webhook(body_bytes, &req.signature, &req.secret),
+        "woocommerce" => web2.verify_woocommerce_webhook(body_bytes, &req.signature, &req.secret),
+        _ => false,
+    };
+
+    Ok(Json(VerifyWebhookSignatureResponse { valid }))
+}
+
+// ---------------- Cashback & Loyalty ----------------
+#[derive(Debug, Deserialize)]
+pub struct ConfigureCashbackRequest {
+    pub merchant_id: String,
+    pub cashback_percentage: f64,
+    pub min_purchase_amount: f64,
+    pub max_cashback_amount: f64,
+    pub loyalty_points_per_coin: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConfigureCashbackResponse {
+    pub success: bool,
+}
+
+pub async fn configure_cashback(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<ConfigureCashbackRequest>,
+) -> Result<Json<ConfigureCashbackResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (admin)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let mut svc = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    match svc.configure_cashback(
+        req.merchant_id,
+        req.cashback_percentage,
+        req.min_purchase_amount,
+        req.max_cashback_amount,
+        req.loyalty_points_per_coin,
+    ) {
+        Ok(()) => Ok(Json(ConfigureCashbackResponse { success: true })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProcessPurchaseWithCashbackRequest {
+    pub merchant_id: String,
+    pub customer_id: String,
+    pub purchase_amount: f64,
+    pub customer_wallet: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProcessPurchaseWithCashbackResponse {
+    pub transaction: p_project_core::merchant_service::CashbackTransaction,
+}
+
+pub async fn process_purchase_with_cashback(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<ProcessPurchaseWithCashbackRequest>,
+) -> Result<Json<ProcessPurchaseWithCashbackResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (user)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let mut svc = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    match svc
+        .process_purchase_with_cashback(
+            req.merchant_id,
+            req.customer_id,
+            req.purchase_amount,
+            req.customer_wallet,
+        )
+        .await
+    {
+        Ok(tx) => Ok(Json(ProcessPurchaseWithCashbackResponse {
+            transaction: tx,
+        })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetCustomerLoyaltyPointsRequest {
+    pub customer_id: String,
+    pub merchant_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetCustomerLoyaltyPointsResponse {
+    pub customer_id: String,
+    pub merchant_id: String,
+    pub points: f64,
+    pub total_earned: f64,
+    pub total_spent: f64,
+}
+
+pub async fn get_customer_loyalty_points(
+    Json(req): Json<GetCustomerLoyaltyPointsRequest>,
+) -> Result<Json<GetCustomerLoyaltyPointsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Public info endpoint
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let svc = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    let points = svc.get_customer_loyalty_points(&req.customer_id, &req.merchant_id);
+    let (p, earned, spent) = match points {
+        Some(lp) => (lp.points, lp.total_earned, lp.total_spent),
+        None => (0.0, 0.0, 0.0),
+    };
+    Ok(Json(GetCustomerLoyaltyPointsResponse {
+        customer_id: req.customer_id,
+        merchant_id: req.merchant_id,
+        points: p,
+        total_earned: earned,
+        total_spent: spent,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RedeemLoyaltyPointsRequest {
+    pub customer_id: String,
+    pub merchant_id: String,
+    pub points_to_redeem: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RedeemLoyaltyPointsResponse {
+    pub redeemed_value: f64,
+}
+
+pub async fn redeem_loyalty_points(
+    headers: axum::http::HeaderMap,
+    Json(req): Json<RedeemLoyaltyPointsRequest>,
+) -> Result<Json<RedeemLoyaltyPointsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Require JWT (user)
+    let _claims = parse_jwt_from_headers(&headers)?;
+
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let mut svc = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    match svc.redeem_loyalty_points(&req.customer_id, &req.merchant_id, req.points_to_redeem) {
+        Ok(value) => Ok(Json(RedeemLoyaltyPointsResponse {
+            redeemed_value: value,
+        })),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetCashbackTransactionRequest {
+    pub transaction_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetCashbackTransactionResponse {
+    pub transaction: Option<p_project_core::merchant_service::CashbackTransaction>,
+}
+
+pub async fn get_cashback_transaction(
+    Json(req): Json<GetCashbackTransactionRequest>,
+) -> Result<Json<GetCashbackTransactionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Public lookup
+    let merchant_config = p_project_core::merchant_service::MerchantServiceConfig {
+        fee_percentage: 0.01,
+        max_transaction_amount: 10000.0,
+    };
+    let svc = p_project_core::merchant_service::MerchantService::new(merchant_config);
+    let tx = svc.get_cashback_transaction(&req.transaction_id);
+    Ok(Json(GetCashbackTransactionResponse {
+        transaction: tx.cloned(),
+    }))
+}
+
+// ---------------- Webhooks for bots ----------------
+#[derive(Debug, Deserialize)]
+pub struct TelegramWebhookRequest {
+    pub update_id: Option<i64>,
+    #[serde(default)]
+    pub message: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebhookAckResponse {
+    pub ok: bool,
+    pub received: bool,
+}
+
+pub async fn telegram_webhook(
+    Json(_req): Json<TelegramWebhookRequest>,
+) -> Result<Json<WebhookAckResponse>, (StatusCode, Json<ErrorResponse>)> {
+    Ok(Json(WebhookAckResponse {
+        ok: true,
+        received: true,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DiscordWebhookRequest {
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
+}
+
+pub async fn discord_webhook(
+    Json(_req): Json<DiscordWebhookRequest>,
+) -> Result<Json<WebhookAckResponse>, (StatusCode, Json<ErrorResponse>)> {
+    Ok(Json(WebhookAckResponse {
+        ok: true,
+        received: true,
+    }))
 }

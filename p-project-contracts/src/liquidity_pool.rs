@@ -14,6 +14,8 @@ pub enum LiquidityPoolError {
     InvalidDuration,
     SerializationError(String),
     InsufficientRewards,
+    LiquidityLocked,
+    SlippageExceeded,
 }
 
 impl fmt::Display for LiquidityPoolError {
@@ -31,11 +33,31 @@ impl fmt::Display for LiquidityPoolError {
                 write!(f, "Serialization error: {}", msg)
             }
             LiquidityPoolError::InsufficientRewards => write!(f, "Insufficient rewards available"),
+            LiquidityPoolError::LiquidityLocked => write!(f, "Liquidity is locked"),
+            LiquidityPoolError::SlippageExceeded => write!(f, "Slippage tolerance exceeded"),
         }
     }
 }
 
 impl std::error::Error for LiquidityPoolError {}
+
+/// Optional protection and automation knobs for LP behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiquidityMechanisms {
+    pub slippage_tolerance_bps: u32,
+    pub lp_lock_days: i64,
+    pub auto_liquidity_rate_bps: u32,
+}
+
+impl Default for LiquidityMechanisms {
+    fn default() -> Self {
+        Self {
+            slippage_tolerance_bps: 50, // 0.5%
+            lp_lock_days: 30,
+            auto_liquidity_rate_bps: 0,
+        }
+    }
+}
 
 // Liquidity pool configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +99,7 @@ pub struct LiquidityPool {
     pub k_constant: f64,   // Constant product formula: x * y = k
     pub total_volume: f64, // Total volume traded through the pool
     pub total_fees: f64,   // Total fees collected
+    pub mechanisms: LiquidityMechanisms,
 }
 
 impl LiquidityPool {
@@ -112,6 +135,7 @@ impl LiquidityPool {
             k_constant: 0.0,
             total_volume: 0.0,
             total_fees: 0.0,
+            mechanisms: LiquidityMechanisms::default(),
         }
     }
 
@@ -131,6 +155,7 @@ impl LiquidityPool {
             return Err(LiquidityPoolError::InvalidDuration);
         }
 
+        let locked_duration = duration_days.max(self.mechanisms.lp_lock_days);
         let liquidity_amount = (token_a_amount * token_b_amount).sqrt();
 
         // If this is the first liquidity added, initialize the k constant
@@ -152,6 +177,7 @@ impl LiquidityPool {
             existing_position.liquidity_amount += liquidity_amount;
             existing_position.token_a_amount += token_a_amount;
             existing_position.token_b_amount += token_b_amount;
+            existing_position.duration_days = existing_position.duration_days.max(locked_duration);
             existing_position.clone()
         } else {
             // Create new position
@@ -162,7 +188,7 @@ impl LiquidityPool {
                 token_a_amount,
                 token_b_amount,
                 start_time,
-                duration_days,
+                duration_days: locked_duration,
                 accumulated_rewards: 0.0,
                 last_reward_time: start_time,
                 claimed_rewards: 0.0,
@@ -182,6 +208,13 @@ impl LiquidityPool {
             .get(user_id)
             .ok_or(LiquidityPoolError::UserNotInPool)?
             .clone();
+
+        // Enforce time-based liquidity locking based on the position's duration
+        let now = Utc::now().naive_utc();
+        let lock_end = position.start_time + chrono::Duration::days(position.duration_days.max(0));
+        if now < lock_end {
+            return Err(LiquidityPoolError::LiquidityLocked);
+        }
 
         // Calculate proportional amounts to return
         let liquidity_ratio = position.liquidity_amount / self.total_liquidity;
@@ -277,7 +310,9 @@ impl LiquidityPool {
 
         // Update volume and fees tracking
         self.total_volume += input_amount;
-        self.total_fees += input_amount * self.config.fee_tier;
+        let fee_amount = input_amount * self.config.fee_tier;
+        self.total_fees += fee_amount;
+        self.apply_auto_liquidity(fee_amount);
 
         Ok(output_amount)
     }
@@ -429,6 +464,52 @@ impl LiquidityPool {
             avg_liquidity,
             apr_rate: self.config.apr_rate,
         }
+    }
+}
+
+impl LiquidityPool {
+    /// Override default protection parameters.
+    pub fn set_mechanisms(&mut self, mechanisms: LiquidityMechanisms) {
+        self.mechanisms = mechanisms;
+    }
+
+    /// Swap while enforcing a slippage tolerance expectation.
+    pub fn swap_with_slippage(
+        &mut self,
+        input_token: &str,
+        input_amount: f64,
+        expected_output: f64,
+        max_slippage_bps: Option<u32>,
+    ) -> Result<f64, LiquidityPoolError> {
+        let tolerance =
+            max_slippage_bps.unwrap_or(self.mechanisms.slippage_tolerance_bps) as f64 / 10_000.0;
+        let min_output = expected_output * (1.0 - tolerance);
+        let output = self.swap(input_token, input_amount)?;
+        if output < min_output {
+            return Err(LiquidityPoolError::SlippageExceeded);
+        }
+        Ok(output)
+    }
+
+    fn apply_auto_liquidity(&mut self, fee_amount: f64) {
+        let rate = self.mechanisms.auto_liquidity_rate_bps as f64 / 10_000.0;
+        if rate <= 0.0 || fee_amount <= 0.0 {
+            return;
+        }
+        let auto_value = fee_amount * rate;
+        let total_value = self.total_token_a + self.total_token_b;
+        if total_value <= 0.0 {
+            return;
+        }
+        let token_a_share = self.total_token_a / total_value;
+        let token_b_share = self.total_token_b / total_value;
+        let token_a_add = auto_value * token_a_share;
+        let token_b_add = auto_value * token_b_share;
+
+        self.total_token_a += token_a_add;
+        self.total_token_b += token_b_add;
+        self.total_liquidity += (token_a_add * token_b_add).sqrt();
+        self.k_constant = self.total_token_a * self.total_token_b;
     }
 }
 

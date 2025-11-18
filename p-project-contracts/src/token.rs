@@ -78,6 +78,38 @@ pub struct PProjectToken {
     bot_cooldown_period: i64,        // cooldown period in seconds
     user_last_transaction: HashMap<String, NaiveDateTime>, // user_id -> last transaction time
     restricted_wallets: HashMap<String, bool>, // user_id -> is_restricted (for team wallets)
+    // New fields for enhanced deflationary mechanisms
+    scheduled_burns: Vec<ScheduledBurn>, // Scheduled token burns
+    burn_schedule_enabled: bool,         // Whether scheduled burns are enabled
+    milestone_burns: Vec<MilestoneBurn>, // Milestone-based token burns
+    revenue_linked_burns: Vec<RevenueLinkedBurn>, // Revenue-linked token burns
+}
+
+// Structure for scheduled burns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduledBurn {
+    pub timestamp: NaiveDateTime,
+    pub amount: f64,
+    pub executed: bool,
+}
+
+// Structure for milestone-based burns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MilestoneBurn {
+    pub milestone_name: String,
+    pub target: String, // e.g., "holders_count", "transactions_count", "supply_reduction"
+    pub target_value: f64,
+    pub burn_amount: f64,
+    pub executed: bool,
+}
+
+// Structure for revenue-linked burns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevenueLinkedBurn {
+    pub revenue_source: String, // e.g., "staking_rewards", "transaction_fees", "partnerships"
+    pub revenue_amount: f64,
+    pub burn_percentage: f64, // Percentage of revenue to burn
+    pub executed: bool,
 }
 
 impl PProjectToken {
@@ -103,6 +135,11 @@ impl PProjectToken {
             bot_cooldown_period: 60,          // 60 seconds cooldown by default
             user_last_transaction: HashMap::new(),
             restricted_wallets: HashMap::new(), // Initialize restricted wallets
+            // Initialize enhanced deflationary mechanism fields
+            scheduled_burns: Vec::new(),
+            burn_schedule_enabled: false,
+            milestone_burns: Vec::new(),
+            revenue_linked_burns: Vec::new(),
         }
     }
 
@@ -282,7 +319,7 @@ impl PProjectToken {
         }
     }
 
-    /// Get dynamic burn rate based on network activity
+    /// Get dynamic burn rate based on network activity with enhanced logic
     fn get_dynamic_burn_rate(&self, user_id: &str) -> f64 {
         // Base burn rate
         let mut burn_rate = self.base_burn_rate;
@@ -304,7 +341,8 @@ impl PProjectToken {
             burn_rate += self.base_burn_rate * network_activity_multiplier;
         }
 
-        burn_rate
+        // Cap the burn rate at a maximum of 5%
+        burn_rate.min(0.05)
     }
 
     /// Set maximum daily transfer limit as percentage of total supply
@@ -667,5 +705,226 @@ impl PProjectToken {
     /// Get total transactions
     pub fn get_total_transactions(&self) -> u64 {
         self.total_transactions
+    }
+
+    /// Add a scheduled burn
+    pub fn add_scheduled_burn(&mut self, timestamp: NaiveDateTime, amount: f64) {
+        let scheduled_burn = ScheduledBurn {
+            timestamp,
+            amount,
+            executed: false,
+        };
+        self.scheduled_burns.push(scheduled_burn);
+        self.burn_schedule_enabled = true;
+
+        // Store event details before borrowing self again
+        let amount_copy = amount;
+
+        self.log_event(
+            "SCHEDULED_BURN_ADDED".to_string(),
+            "SYSTEM".to_string(),
+            amount_copy,
+            format!("Scheduled burn added for {}", timestamp),
+        );
+    }
+
+    /// Execute scheduled burns that are due
+    pub fn execute_scheduled_burns(&mut self) -> Result<f64, TokenError> {
+        if !self.burn_schedule_enabled {
+            return Ok(0.0);
+        }
+
+        let now = Utc::now().naive_utc();
+        let mut total_burned = 0.0;
+
+        for i in 0..self.scheduled_burns.len() {
+            if !self.scheduled_burns[i].executed && self.scheduled_burns[i].timestamp <= now {
+                if self.scheduled_burns[i].amount > 0.0
+                    && self.scheduled_burns[i].amount <= self.total_supply
+                {
+                    self.total_supply -= self.scheduled_burns[i].amount;
+                    total_burned += self.scheduled_burns[i].amount;
+                    self.scheduled_burns[i].executed = true;
+
+                    // Store event details before borrowing self again
+                    let amount_copy = self.scheduled_burns[i].amount;
+
+                    self.log_event(
+                        "SCHEDULED_BURN_EXECUTED".to_string(),
+                        "SYSTEM".to_string(),
+                        amount_copy,
+                        "Scheduled burn executed".to_string(),
+                    );
+                }
+            }
+        }
+
+        Ok(total_burned)
+    }
+
+    /// Add a milestone-based burn
+    pub fn add_milestone_burn(
+        &mut self,
+        milestone_name: String,
+        target: String,
+        target_value: f64,
+        burn_amount: f64,
+    ) {
+        let milestone_burn = MilestoneBurn {
+            milestone_name: milestone_name.clone(),
+            target,
+            target_value,
+            burn_amount,
+            executed: false,
+        };
+        self.milestone_burns.push(milestone_burn);
+
+        // Store event details before borrowing self again
+        let burn_amount_copy = burn_amount;
+
+        self.log_event(
+            "MILESTONE_BURN_ADDED".to_string(),
+            "SYSTEM".to_string(),
+            burn_amount_copy,
+            format!("Milestone burn added for {}", milestone_name),
+        );
+    }
+
+    /// Check and execute milestone-based burns
+    pub fn check_milestone_burns(&mut self) -> Result<f64, TokenError> {
+        let mut total_burned = 0.0;
+
+        for i in 0..self.milestone_burns.len() {
+            if !self.milestone_burns[i].executed {
+                let should_execute = match self.milestone_burns[i].target.as_str() {
+                    "holders_count" => {
+                        self.holders.len() as f64 >= self.milestone_burns[i].target_value
+                    }
+                    "transactions_count" => {
+                        self.total_transactions as f64 >= self.milestone_burns[i].target_value
+                    }
+                    "supply_reduction" => {
+                        // This would be based on percentage reduction from initial supply
+                        let initial_supply = 350000000.0; // Assuming initial supply
+                        let reduction_percentage =
+                            (initial_supply - self.total_supply) / initial_supply * 100.0;
+                        reduction_percentage >= self.milestone_burns[i].target_value
+                    }
+                    _ => false,
+                };
+
+                if should_execute {
+                    if self.milestone_burns[i].burn_amount > 0.0
+                        && self.milestone_burns[i].burn_amount <= self.total_supply
+                    {
+                        self.total_supply -= self.milestone_burns[i].burn_amount;
+                        total_burned += self.milestone_burns[i].burn_amount;
+                        self.milestone_burns[i].executed = true;
+
+                        // Store event details before borrowing self again
+                        let burn_amount_copy = self.milestone_burns[i].burn_amount;
+                        let milestone_name_copy = self.milestone_burns[i].milestone_name.clone();
+
+                        self.log_event(
+                            "MILESTONE_BURN_EXECUTED".to_string(),
+                            "SYSTEM".to_string(),
+                            burn_amount_copy,
+                            format!("Milestone burn executed for {}", milestone_name_copy),
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(total_burned)
+    }
+
+    /// Add a revenue-linked burn
+    pub fn add_revenue_linked_burn(
+        &mut self,
+        revenue_source: String,
+        revenue_amount: f64,
+        burn_percentage: f64,
+    ) {
+        let revenue_burn = RevenueLinkedBurn {
+            revenue_source: revenue_source.clone(),
+            revenue_amount,
+            burn_percentage,
+            executed: false,
+        };
+        self.revenue_linked_burns.push(revenue_burn);
+
+        let burn_amount = revenue_amount * burn_percentage / 100.0;
+        // Store event details before borrowing self again
+        let burn_amount_copy = burn_amount;
+        let revenue_source_copy = revenue_source.clone();
+
+        self.log_event(
+            "REVENUE_BURN_ADDED".to_string(),
+            "SYSTEM".to_string(),
+            burn_amount_copy,
+            format!("Revenue-linked burn added for {}", revenue_source_copy),
+        );
+    }
+
+    /// Execute revenue-linked burns
+    pub fn execute_revenue_linked_burns(&mut self) -> Result<f64, TokenError> {
+        let mut total_burned = 0.0;
+
+        for i in 0..self.revenue_linked_burns.len() {
+            if !self.revenue_linked_burns[i].executed {
+                let burn_amount = self.revenue_linked_burns[i].revenue_amount
+                    * self.revenue_linked_burns[i].burn_percentage
+                    / 100.0;
+
+                if burn_amount > 0.0 && burn_amount <= self.total_supply {
+                    self.total_supply -= burn_amount;
+                    total_burned += burn_amount;
+                    self.revenue_linked_burns[i].executed = true;
+
+                    // Store event details before borrowing self again
+                    let revenue_source_copy = self.revenue_linked_burns[i].revenue_source.clone();
+
+                    self.log_event(
+                        "REVENUE_BURN_EXECUTED".to_string(),
+                        "SYSTEM".to_string(),
+                        burn_amount,
+                        format!("Revenue-linked burn executed for {}", revenue_source_copy),
+                    );
+                }
+            }
+        }
+
+        Ok(total_burned)
+    }
+
+    /// Get all scheduled burns
+    pub fn get_scheduled_burns(&self) -> &Vec<ScheduledBurn> {
+        &self.scheduled_burns
+    }
+
+    /// Get all milestone burns
+    pub fn get_milestone_burns(&self) -> &Vec<MilestoneBurn> {
+        &self.milestone_burns
+    }
+
+    /// Get all revenue-linked burns
+    pub fn get_revenue_linked_burns(&self) -> &Vec<RevenueLinkedBurn> {
+        &self.revenue_linked_burns
+    }
+
+    /// Enable or disable burn schedule
+    pub fn set_burn_schedule_enabled(&mut self, enabled: bool) {
+        self.burn_schedule_enabled = enabled;
+
+        self.log_event(
+            "BURN_SCHEDULE_SETTING".to_string(),
+            "SYSTEM".to_string(),
+            0.0,
+            format!(
+                "Burn schedule {}",
+                if enabled { "enabled" } else { "disabled" }
+            ),
+        );
     }
 }
