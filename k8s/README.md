@@ -9,31 +9,38 @@
 ### Build and push images
 ```
 # From repo root
+# Replace `your-ghcr-namespace` with your GH org/user
+
 # API
-docker build -f p-project-api/Dockerfile -t your-registry/p-project-api:latest .
-docker push your-registry/p-project-api:latest
+docker build -f p-project-api/Dockerfile -t ghcr.io/your-ghcr-namespace/p-project-api:latest .
+docker push ghcr.io/your-ghcr-namespace/p-project-api:latest
 
 # Web (nginx)
-docker build -f p-project-web/Dockerfile -t your-registry/p-project-web:latest .
-docker push your-registry/p-project-web:latest
+docker build -f p-project-web/Dockerfile -t ghcr.io/your-ghcr-namespace/p-project-web:latest .
+docker push ghcr.io/your-ghcr-namespace/p-project-web:latest
 
 # Bridge relayer
-docker build -f p-project-bridge/Dockerfile -t your-registry/p-project-bridge-relayer:latest .
-docker push your-registry/p-project-bridge-relayer:latest
+docker build -f p-project-bridge/Dockerfile -t ghcr.io/your-ghcr-namespace/p-project-bridge-relayer:latest .
+docker push ghcr.io/your-ghcr-namespace/p-project-bridge-relayer:latest
 
 # Airdrop cron
-docker build -f p-project-airdrop/Dockerfile -t your-registry/p-project-airdrop-cron:latest .
-docker push your-registry/p-project-airdrop-cron:latest
+docker build -f p-project-airdrop/Dockerfile -t ghcr.io/your-ghcr-namespace/p-project-airdrop-cron:latest .
+docker push ghcr.io/your-ghcr-namespace/p-project-airdrop-cron:latest
 ```
 
 ### Apply
+Using kustomize to create the namespace and deploy all resources:
 ```
-kubectl apply -f k8s/secrets.example.yaml   # edit values first or create your own
-kubectl apply -f k8s/api.yaml
-kubectl apply -f k8s/web.yaml
-kubectl apply -f k8s/bridge-relayer.yaml
-kubectl apply -f k8s/airdrop-cronjob.yaml
-kubectl apply -f k8s/ingress.yaml
+# Create real secrets (or edit a copy of secrets.example.yaml) first
+kubectl apply -f k8s/secrets.example.yaml    # dev only; replace values
+
+# Apply all manifests into the `p-project` namespace
+kubectl apply -k k8s
+```
+
+Validate without changing the cluster:
+```
+kubectl kustomize k8s | kubectl apply --dry-run=client -f -
 ```
 
 ### Notes
@@ -43,3 +50,4 @@ kubectl apply -f k8s/ingress.yaml
 - For production, point `DATABASE_URL` at managed MySQL. Redis/Mongo are not deployed here.
 - Bridge relayer requires chain RPCs and keys in `p-project-bridge-secrets` to enable Ethereum support.
 -- Replace `your-ghcr-namespace` in images with your GitHub user/org (matches GHCR pushes from the workflow).
+-- All resources are namespaced under `p-project` via kustomization. Use `-n p-project` when querying.

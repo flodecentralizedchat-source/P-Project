@@ -333,6 +333,11 @@ P-Project prioritizes security through:
   - Use the token with `Authorization: Bearer <token>`.
 - Configure CORS with `CORS_ALLOWED_ORIGINS` and `CORS_ALLOW_CREDENTIALS`.
 - Request guardrails (enabled by default): 128 concurrent requests, 30s timeout, 1MB body limit.
+- Additional safety controls:
+  - Security headers: HSTS, X-Frame-Options, Referrer-Policy, CSP added to all responses.
+  - Admin IP allowlist: set `ADMIN_IP_ALLOWLIST` (comma-separated) to restrict admin routes.
+  - Token-gated webhooks: set `WEBHOOK_TOKEN` or per-platform `TELEGRAM_WEBHOOK_TOKEN` / `DISCORD_WEBHOOK_TOKEN` and include `X-Webhook-Token` header or `?token=` query.
+  - Compliance blocklists: set `WALLET_BLOCKLIST` and `USERNAME_BLOCKLIST` to prevent account creation and transfers involving blocked values.
 
 ## 🤓 Meet Professor P
 

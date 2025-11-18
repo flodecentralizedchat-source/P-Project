@@ -9,6 +9,7 @@ pub mod comprehensive_test_suite; // Add the new comprehensive test suite module
 pub mod comprehensive_verification; // Add the new comprehensive verification module
 pub mod cross_chain_liquidity; // Cross-chain liquidity orchestration
 pub mod dex_listing; // DEX listing orchestration helpers
+pub mod router; // Router with automatic liquidity provision
 pub mod formal_verification; // Add the new formal verification module
 pub mod l2_batching; // Add the new L2 batching module
 pub mod l2_cross_chain; // Add the new L2 cross-chain module
@@ -63,6 +64,9 @@ pub use supply_chain::{
 };
 pub use token::PProjectToken;
 pub use treasury::{LiquidityMiningProgram, Treasury};
+
+#[cfg(test)]
+mod router_test;
 pub use vesting::VestingContract; // Re-export load testing types
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ mod sui;
 
 // New modules for relayer components
 mod eth_listener;
+#[cfg(feature = "solana-relayer")]
 mod solana_relayer;
 mod sui_relayer;
 
@@ -26,6 +27,7 @@ use sui::SuiAdapter;
 
 // Re-export the new modules
 pub use eth_listener::EthEventListener;
+#[cfg(feature = "solana-relayer")]
 pub use solana_relayer::SolanaRelayer;
 pub use sui_relayer::SuiRelayer;
 

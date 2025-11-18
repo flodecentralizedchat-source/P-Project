@@ -358,6 +358,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(handlers::register_partner),
         )
         .route_layer(middleware::from_fn(crate::middleware::require_admin))
+        .route_layer(middleware::from_fn(crate::middleware::require_admin_ip))
         .route_layer(middleware::from_fn(crate::middleware::require_jwt));
 
     let app = Router::new()
@@ -379,6 +380,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(ConcurrencyLimitLayer::new(128))
         .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(crate::middleware::build_body_limit_from_env())
+        .layer(middleware::from_fn(crate::middleware::security_headers))
         .layer(crate::middleware::build_cors_from_env());
 
     // Run server

@@ -1,0 +1,29 @@
+name: Scripts CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run script tests (bash)
+      # Only needs bash; tests run in dry-run mode to avoid external deps
+        run: |
+          bash scripts/tests/test_runner.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run script tests (PowerShell)
+        shell: pwsh
+        run: |
+          pwsh -File scripts/tests/win-tests.ps1
+

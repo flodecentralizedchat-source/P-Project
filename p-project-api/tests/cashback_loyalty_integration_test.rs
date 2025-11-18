@@ -4,44 +4,16 @@ use axum::{
     http::{self, Request, StatusCode},
     Router,
 };
-use p_project_api::{handlers, shared::AppState};
-use p_project_core::database::MySqlDatabase;
-use std::sync::Arc;
+use p_project_api::handlers;
 use tower::ServiceExt; // for `call`, `oneshot`, and `ready`
-
-// Mock database for testing
-struct MockDatabase;
-
-#[async_trait::async_trait]
-impl MySqlDatabase for MockDatabase {
-    // Implement minimal required methods for testing
-    async fn new(_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(MockDatabase)
-    }
-
-    async fn init_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
-    }
-
-    // Add other required methods as needed
-}
 
 #[tokio::test]
 async fn test_configure_cashback() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
-
     // Build our application with a route
-    let app = Router::new()
-        .route(
-            "/merchant/cashback/configure",
-            axum::routing::post(handlers::configure_cashback),
-        )
-        .with_state(app_state);
+    let app = Router::new().route(
+        "/merchant/cashback/configure",
+        axum::routing::post(handlers::configure_cashback),
+    );
 
     // Create a test request
     let request = Request::builder()
@@ -68,20 +40,11 @@ async fn test_configure_cashback() {
 
 #[tokio::test]
 async fn test_process_purchase_with_cashback() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
-
     // Build our application with a route
-    let app = Router::new()
-        .route(
-            "/merchant/cashback/process-purchase",
-            axum::routing::post(handlers::process_purchase_with_cashback),
-        )
-        .with_state(app_state);
+    let app = Router::new().route(
+        "/merchant/cashback/process-purchase",
+        axum::routing::post(handlers::process_purchase_with_cashback),
+    );
 
     // Create a test request
     let request = Request::builder()
@@ -107,20 +70,11 @@ async fn test_process_purchase_with_cashback() {
 
 #[tokio::test]
 async fn test_get_customer_loyalty_points() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
-
     // Build our application with a route
-    let app = Router::new()
-        .route(
-            "/merchant/cashback/loyalty-points",
-            axum::routing::post(handlers::get_customer_loyalty_points),
-        )
-        .with_state(app_state);
+    let app = Router::new().route(
+        "/merchant/cashback/loyalty-points",
+        axum::routing::post(handlers::get_customer_loyalty_points),
+    );
 
     // Create a test request
     let request = Request::builder()
@@ -144,20 +98,11 @@ async fn test_get_customer_loyalty_points() {
 
 #[tokio::test]
 async fn test_redeem_loyalty_points() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
-
     // Build our application with a route
-    let app = Router::new()
-        .route(
-            "/merchant/cashback/redeem-points",
-            axum::routing::post(handlers::redeem_loyalty_points),
-        )
-        .with_state(app_state);
+    let app = Router::new().route(
+        "/merchant/cashback/redeem-points",
+        axum::routing::post(handlers::redeem_loyalty_points),
+    );
 
     // Create a test request
     let request = Request::builder()
@@ -182,20 +127,11 @@ async fn test_redeem_loyalty_points() {
 
 #[tokio::test]
 async fn test_get_cashback_transaction() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
-
     // Build our application with a route
-    let app = Router::new()
-        .route(
-            "/merchant/cashback/transaction",
-            axum::routing::post(handlers::get_cashback_transaction),
-        )
-        .with_state(app_state);
+    let app = Router::new().route(
+        "/merchant/cashback/transaction",
+        axum::routing::post(handlers::get_cashback_transaction),
+    );
 
     // Create a test request
     let request = Request::builder()

@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ghcr.io/example/p-project-web:latest
+          image: ghcr.io/your-ghcr-namespace/p-project-web:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

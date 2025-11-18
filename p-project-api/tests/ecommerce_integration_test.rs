@@ -4,36 +4,42 @@ use axum::{
     http::{self, Request, StatusCode},
     Router,
 };
-use p_project_api::{handlers, shared::AppState};
-use p_project_core::database::MySqlDatabase;
+use p_project_api::{handlers, ratelimit::RateLimiter, shared::AppState};
+use p_project_core::{
+    database::MySqlDatabase,
+    EcosystemGraph,
+    PartnerRegistry,
+    UvpEngine,
+};
+use std::env;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower::ServiceExt; // for `call`, `oneshot`, and `ready`
 
-// Mock database for testing
-struct MockDatabase;
+async fn build_test_app_state() -> AppState {
+    let db_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "mysql://root:rootpassword@localhost:3306/p_project".to_string());
+    let db = MySqlDatabase::new(&db_url)
+        .await
+        .expect("failed to build MySQL database");
 
-#[async_trait::async_trait]
-impl MySqlDatabase for MockDatabase {
-    // Implement minimal required methods for testing
-    async fn new(_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(MockDatabase)
+    let uvp_engine = UvpEngine::new(Vec::new());
+    let partner_registry = PartnerRegistry::new();
+    let ecosystem_graph = EcosystemGraph::new();
+
+    AppState {
+        db: Arc::new(db),
+        rate_limiter: Arc::new(RateLimiter::from_pair(100, 60)),
+        strict_rate_limiter: Arc::new(RateLimiter::from_pair(10, 60)),
+        uvp_engine: Arc::new(RwLock::new(uvp_engine)),
+        partner_registry: Arc::new(RwLock::new(partner_registry)),
+        ecosystem_graph: Arc::new(RwLock::new(ecosystem_graph)),
     }
-
-    async fn init_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
-    }
-
-    // Add other required methods as needed
 }
 
 #[tokio::test]
 async fn test_create_ecommerce_integration() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
+    let app_state = build_test_app_state().await;
 
     // Build our application with a route
     let app = Router::new()
@@ -41,7 +47,7 @@ async fn test_create_ecommerce_integration() {
             "/web2/create-ecommerce-integration",
             axum::routing::post(handlers::create_ecommerce_integration),
         )
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     // Create a test request
     let request = Request::builder()
@@ -70,12 +76,7 @@ async fn test_create_ecommerce_integration() {
 
 #[tokio::test]
 async fn test_process_ecommerce_payment() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
+    let app_state = build_test_app_state().await;
 
     // Build our application with a route
     let app = Router::new()
@@ -83,7 +84,7 @@ async fn test_process_ecommerce_payment() {
             "/web2/process-ecommerce-payment",
             axum::routing::post(handlers::process_ecommerce_payment),
         )
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     // Create a test request
     let request = Request::builder()
@@ -113,12 +114,7 @@ async fn test_process_ecommerce_payment() {
 
 #[tokio::test]
 async fn test_verify_webhook_signature() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
+    let app_state = build_test_app_state().await;
 
     // Build our application with a route
     let app = Router::new()
@@ -126,7 +122,7 @@ async fn test_verify_webhook_signature() {
             "/web2/verify-webhook",
             axum::routing::post(handlers::verify_webhook_signature),
         )
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     // Create a test request
     let request = Request::builder()
@@ -159,12 +155,7 @@ async fn test_verify_webhook_signature() {
 
 #[tokio::test]
 async fn test_add_digital_goods_product() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
+    let app_state = build_test_app_state().await;
 
     // Build our application with a route
     let app = Router::new()
@@ -172,7 +163,7 @@ async fn test_add_digital_goods_product() {
             "/merchant/digital-goods",
             axum::routing::post(handlers::add_digital_goods_product),
         )
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     // Create a test request
     let request = Request::builder()
@@ -210,12 +201,7 @@ async fn test_add_digital_goods_product() {
 
 #[tokio::test]
 async fn test_purchase_digital_goods() {
-    // Create app state with mock database
-    let app_state = AppState {
-        db: Arc::new(MockDatabase),
-        rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(100, 60)),
-        strict_rate_limiter: Arc::new(p_project_api::ratelimit::RateLimiter::new(10, 60)),
-    };
+    let app_state = build_test_app_state().await;
 
     // Build our application with a route
     let app = Router::new()
@@ -223,7 +209,7 @@ async fn test_purchase_digital_goods() {
             "/merchant/digital-goods/purchase",
             axum::routing::post(handlers::purchase_digital_goods),
         )
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     // Create a test request
     let request = Request::builder()

@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./interfaces/IUniswapV2Factory.sol";
+import "./interfaces/IUniswapV2Router02.sol";
+
 /**
  * @title P-Project Token
  * @dev ERC-20 token with deflationary mechanisms including dynamic burn rates,
- * transaction-based burns, scheduled burns, milestone burns, and revenue-linked burns.
+ * transaction-based burns, scheduled burns, milestone burns, revenue-linked burns,
+ * and auto-liquidity features.
  */
 contract PProjectToken {
     // Token information
@@ -72,6 +76,20 @@ contract PProjectToken {
     mapping(string => uint256) public liquidityPools;
     mapping(string => bool) public liquidityLocked;
     
+    // Auto-liquidity mechanisms
+    IUniswapV2Router02 public uniswapV2Router;
+    address public uniswapV2Pair;
+    bool public tradingEnabled;
+    bool public inSwapAndLiquify;
+    
+    // Auto-liquidity settings
+    uint256 public liquidityFee; // Percentage of liquidity fee (scaled by 1e18)
+    uint256 public marketingFee; // Percentage of marketing fee (scaled by 1e18)
+    uint256 public maxLiquidityFee; // Maximum liquidity fee (scaled by 1e18)
+    uint256 public minTokensBeforeSwap; // Minimum tokens before swap
+    address public marketingWallet;
+    bool public swapAndLiquifyEnabled;
+    
     // Events
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
@@ -87,10 +105,28 @@ contract PProjectToken {
     event LiquidityRemoved(string poolId, address user, uint256 amount);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     
+    // Auto-liquidity events
+    event SwapAndLiquifyEnabledUpdated(bool enabled);
+    event LiquidityFeesUpdated(uint256 liquidityFee, uint256 marketingFee);
+    event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
+    event MarketingWalletUpdated(address marketingWallet);
+    event SwapAndLiquify(
+        uint256 tokensSwapped,
+        uint256 ethReceived,
+        uint256 tokensIntoLiqudity
+    );
+    event SendToMarketing(uint256 amount);
+    
     // Modifiers
     modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
         _;
+    }
+    
+    modifier lockTheSwap() {
+        inSwapAndLiquify = true;
+        _;
+        inSwapAndLiquify = false;
     }
     
     /**
@@ -109,6 +145,15 @@ contract PProjectToken {
         botProtectionEnabled = true;
         botCooldownPeriod = 60; // 60 seconds
         burnScheduleEnabled = false;
+        
+        // Auto-liquidity settings
+        liquidityFee = 3e16; // 3% liquidity fee
+        marketingFee = 2e16; // 2% marketing fee
+        maxLiquidityFee = 10e16; // 10% maximum fee
+        minTokensBeforeSwap = 1000 * 10**decimals; // 1000 tokens
+        marketingWallet = owner;
+        swapAndLiquifyEnabled = true;
+        tradingEnabled = false;
         
         // Mint initial supply to owner
         _balances[owner] = _totalSupply;
@@ -174,7 +219,7 @@ contract PProjectToken {
     }
     
     /**
-     * @dev Internal transfer function with deflationary mechanisms
+     * @dev Internal transfer function with deflationary mechanisms and auto-liquidity
      * @param sender Address sending tokens
      * @param recipient Address receiving tokens
      * @param amount Amount to transfer
@@ -204,10 +249,26 @@ contract PProjectToken {
         // Update last transaction time for bot protection
         userLastTransaction[sender] = block.timestamp;
         
-        // Calculate dynamic burn amount
-        uint256 dynamicBurnRate = _getDynamicBurnRate(sender);
-        uint256 burnAmount = (amount * dynamicBurnRate) / 1e18;
-        uint256 transferAmount = amount - burnAmount;
+        // Calculate fees if trading is enabled and not in swap
+        uint256 liquidityFeeAmount = 0;
+        uint256 marketingFeeAmount = 0;
+        uint256 burnAmount = 0;
+        uint256 transferAmount = amount;
+        
+        if (tradingEnabled && !inSwapAndLiquify) {
+            // Calculate liquidity fee
+            liquidityFeeAmount = (amount * liquidityFee) / 1e18;
+            
+            // Calculate marketing fee
+            marketingFeeAmount = (amount * marketingFee) / 1e18;
+            
+            // Calculate dynamic burn amount
+            uint256 dynamicBurnRate = _getDynamicBurnRate(sender);
+            burnAmount = (amount * dynamicBurnRate) / 1e18;
+            
+            // Calculate transfer amount
+            transferAmount = amount - liquidityFeeAmount - marketingFeeAmount - burnAmount;
+        }
         
         // Update balances
         _balances[sender] -= amount;
@@ -224,11 +285,38 @@ contract PProjectToken {
             holders.push(recipient);
         }
         
+        // Handle liquidity fees
+        if (liquidityFeeAmount > 0) {
+            _balances[address(this)] += liquidityFeeAmount;
+            emit Transfer(sender, address(this), liquidityFeeAmount);
+        }
+        
+        // Handle marketing fees
+        if (marketingFeeAmount > 0) {
+            _balances[address(this)] += marketingFeeAmount;
+            emit Transfer(sender, address(this), marketingFeeAmount);
+        }
+        
         // Distribute rewards to holders
         _distributeRewards((burnAmount * rewardRate) / 1e18);
         
+        // Swap and liquify if needed
+        if (swapAndLiquifyEnabled && 
+            !inSwapAndLiquify && 
+            address(uniswapV2Router) != address(0) &&
+            _balances[address(this)] >= minTokensBeforeSwap) {
+            swapAndLiquify(minTokensBeforeSwap);
+        }
+        
+        // Send marketing fees if needed
+        if (marketingFeeAmount > 0 && marketingWallet != address(0)) {
+            sendToMarketing(marketingFeeAmount);
+        }
+        
         emit Transfer(sender, recipient, transferAmount);
-        emit TokensBurned(sender, burnAmount);
+        if (burnAmount > 0) {
+            emit TokensBurned(sender, burnAmount);
+        }
     }
     
     /**
@@ -610,6 +698,143 @@ contract PProjectToken {
     }
     
     /**
+     * @dev Update the Uniswap V2 router address
+     * @param newAddress New router address
+     */
+    function setUniswapRouter(address newAddress) external onlyOwner {
+        uniswapV2Router = IUniswapV2Router02(newAddress);
+        uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory())
+            .getPair(address(this), uniswapV2Router.WETH());
+        
+        // If pair doesn't exist, create it
+        if (uniswapV2Pair == address(0)) {
+            uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory())
+                .createPair(address(this), uniswapV2Router.WETH());
+        }
+    }
+    
+    /**
+     * @dev Enable or disable trading
+     * @param _enabled Whether trading is enabled
+     */
+    function setTradingEnabled(bool _enabled) external onlyOwner {
+        tradingEnabled = _enabled;
+    }
+    
+    /**
+     * @dev Update liquidity and marketing fees
+     * @param _liquidityFee New liquidity fee (scaled by 1e18)
+     * @param _marketingFee New marketing fee (scaled by 1e18)
+     */
+    function setLiquidityFees(uint256 _liquidityFee, uint256 _marketingFee) external onlyOwner {
+        require(_liquidityFee + _marketingFee <= maxLiquidityFee, "Fees exceed maximum");
+        liquidityFee = _liquidityFee;
+        marketingFee = _marketingFee;
+        emit LiquidityFeesUpdated(_liquidityFee, _marketingFee);
+    }
+    
+    /**
+     * @dev Update minimum tokens before swap
+     * @param _minTokensBeforeSwap New minimum tokens before swap
+     */
+    function setMinTokensBeforeSwap(uint256 _minTokensBeforeSwap) external onlyOwner {
+        minTokensBeforeSwap = _minTokensBeforeSwap;
+        emit MinTokensBeforeSwapUpdated(_minTokensBeforeSwap);
+    }
+    
+    /**
+     * @dev Update marketing wallet address
+     * @param _marketingWallet New marketing wallet address
+     */
+    function setMarketingWallet(address _marketingWallet) external onlyOwner {
+        marketingWallet = _marketingWallet;
+        emit MarketingWalletUpdated(_marketingWallet);
+    }
+    
+    /**
+     * @dev Enable or disable swap and liquify
+     * @param _enabled Whether swap and liquify is enabled
+     */
+    function setSwapAndLiquifyEnabled(bool _enabled) external onlyOwner {
+        swapAndLiquifyEnabled = _enabled;
+        emit SwapAndLiquifyEnabledUpdated(_enabled);
+    }
+    
+    /**
+     * @dev Swap tokens for ETH and add liquidity
+     */
+    function swapAndLiquify(uint256 contractTokenBalance) private lockTheSwap {
+        // Split the contract balance into halves
+        uint256 half = contractTokenBalance / 2;
+        uint256 otherHalf = contractTokenBalance - half;
+        
+        // Capture the contract's current ETH balance.
+        uint256 initialBalance = address(this).balance;
+        
+        // Swap tokens for ETH
+        swapTokensForEth(half);
+        
+        // How much ETH did we just swap into?
+        uint256 newBalance = address(this).balance - initialBalance;
+        
+        // Add liquidity to uniswap
+        addLiquidity(otherHalf, newBalance);
+        
+        emit SwapAndLiquify(half, newBalance, otherHalf);
+    }
+    
+    /**
+     * @dev Swap tokens for ETH
+     * @param tokenAmount Amount of tokens to swap
+     */
+    function swapTokensForEth(uint256 tokenAmount) private {
+        // Generate the uniswap pair path of token -> weth
+        address[] memory path = new address[](2);
+        path[0] = address(this);
+        path[1] = uniswapV2Router.WETH();
+        
+        _approve(address(this), address(uniswapV2Router), tokenAmount);
+        
+        // Make the swap
+        uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
+            tokenAmount,
+            0, // accept any amount of ETH
+            path,
+            address(this),
+            block.timestamp
+        );
+    }
+    
+    /**
+     * @dev Add liquidity to Uniswap
+     * @param tokenAmount Amount of tokens to add
+     * @param ethAmount Amount of ETH to add
+     */
+    function addLiquidity(uint256 tokenAmount, uint256 ethAmount) private {
+        // Approve token for uniswap router
+        _approve(address(this), address(uniswapV2Router), tokenAmount);
+        
+        // Add the liquidity
+        uniswapV2Router.addLiquidityETH{value: ethAmount}(
+            address(this),
+            tokenAmount,
+            0, // slippage is unavoidable
+            0, // slippage is unavoidable
+            owner,
+            block.timestamp
+        );
+    }
+    
+    /**
+     * @dev Send tokens to marketing wallet
+     * @param amount Amount of tokens to send
+     */
+    function sendToMarketing(uint256 amount) private {
+        _transfer(address(this), marketingWallet, amount);
+        emit SendToMarketing(amount);
+    }
+    
+    /**
      * @dev Transfer ownership of the contract
      * @param newOwner Address of the new owner
      */
@@ -627,4 +852,9 @@ contract PProjectToken {
         emit OwnershipTransferred(owner, address(0));
         owner = address(0);
     }
+    
+    /**
+     * @dev Receive ETH from Uniswap swaps
+     */
+    receive() external payable {}
 }

@@ -393,6 +393,39 @@ pub async fn create_user(
     State(state): State<AppState>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<Json<CreateUserResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Basic validation and compliance checks
+    if !is_valid_username(&req.username) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_username".to_string(),
+            }),
+        ));
+    }
+    if !is_valid_wallet(&req.wallet_address) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_wallet".to_string(),
+            }),
+        ));
+    }
+    if is_username_blocked(&req.username) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "username_blocklisted".to_string(),
+            }),
+        ));
+    }
+    if is_wallet_blocked(&req.wallet_address) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "wallet_blocklisted".to_string(),
+            }),
+        ));
+    }
     let id = p_project_core::utils::generate_id();
     match state
         .db
@@ -517,6 +550,20 @@ pub async fn transfer_tokens(
                 error: "invalid_amount".to_string(),
             }),
         ));
+    }
+    // Compliance: blocklisted wallets cannot participate
+    if let (Ok(Some(from_u)), Ok(Some(to_u))) = (
+        state.db.get_user(&req.from_user_id).await,
+        state.db.get_user(&req.to_user_id).await,
+    ) {
+        if is_wallet_blocked(&from_u.wallet_address) || is_wallet_blocked(&to_u.wallet_address) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "wallet_blocklisted".to_string(),
+                }),
+            ));
+        }
     }
     let tx_id = p_project_core::utils::generate_id();
     match state
@@ -3888,12 +3935,19 @@ pub struct WebhookAckResponse {
 }
 
 pub async fn telegram_webhook(
+    headers: HeaderMap,
+    Query(q): Option<Query<HashMap<String, String>>>,
     Json(_req): Json<TelegramWebhookRequest>,
 ) -> Result<Json<WebhookAckResponse>, (StatusCode, Json<ErrorResponse>)> {
-    Ok(Json(WebhookAckResponse {
-        ok: true,
-        received: true,
-    }))
+    if !webhook_token_valid(&headers, q.as_ref().map(|x| &x.0), "TELEGRAM_WEBHOOK_TOKEN") {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "unauthorized".to_string(),
+            }),
+        ));
+    }
+    Ok(Json(WebhookAckResponse { ok: true, received: true }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -3903,10 +3957,143 @@ pub struct DiscordWebhookRequest {
 }
 
 pub async fn discord_webhook(
+    headers: HeaderMap,
+    Query(q): Option<Query<HashMap<String, String>>>,
     Json(_req): Json<DiscordWebhookRequest>,
 ) -> Result<Json<WebhookAckResponse>, (StatusCode, Json<ErrorResponse>)> {
-    Ok(Json(WebhookAckResponse {
-        ok: true,
-        received: true,
-    }))
+    if !webhook_token_valid(&headers, q.as_ref().map(|x| &x.0), "DISCORD_WEBHOOK_TOKEN") {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "unauthorized".to_string(),
+            }),
+        ));
+    }
+    Ok(Json(WebhookAckResponse { ok: true, received: true }))
+}
+
+// ---------------- Validation & Blocklists ----------------
+fn is_valid_username(s: &str) -> bool {
+    let len = s.len();
+    if len < 3 || len > 32 { return false; }
+    s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' ))
+}
+
+fn is_valid_wallet(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    lower.len() == 42 && lower.starts_with("0x") && lower[2..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn parse_list_env(key: &str) -> Vec<String> {
+    env::var(key)
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn is_wallet_blocked(addr: &str) -> bool {
+    let list = parse_list_env("WALLET_BLOCKLIST");
+    let a = addr.to_ascii_lowercase();
+    list.iter().any(|x| x.to_ascii_lowercase() == a)
+}
+
+fn is_username_blocked(name: &str) -> bool {
+    let list = parse_list_env("USERNAME_BLOCKLIST");
+    let n = name.to_ascii_lowercase();
+    list.iter().any(|x| x.to_ascii_lowercase() == n)
+}
+
+fn webhook_token_valid(
+    headers: &HeaderMap,
+    query: Option<&HashMap<String, String>>,
+    specific_env_key: &str,
+) -> bool {
+    let hdr = headers
+        .get("x-webhook-token")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let qry = query
+        .and_then(|m| m.get("token").cloned());
+    let provided = hdr.or(qry);
+    let specific = env::var(specific_env_key).ok();
+    let generic = env::var("WEBHOOK_TOKEN").ok();
+
+    match (provided, specific, generic) {
+        (Some(p), Some(s), _) => constant_time_eq(&p, &s),
+        (Some(p), None, Some(g)) => constant_time_eq(&p, &g),
+        // If no secret configured, deny by default
+        _ => false,
+    }
+}
+
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() { return false; }
+    let mut acc = 0u8;
+    for (x, y) in a.as_bytes().iter().zip(b.as_bytes()) { acc |= x ^ y; }
+    acc == 0
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn username_validation() {
+        assert!(super::is_valid_username("user_123"));
+        assert!(!super::is_valid_username("ab")); // too short
+        assert!(!super::is_valid_username("has space"));
+        let long = "a".repeat(33);
+        assert!(!super::is_valid_username(&long));
+    }
+
+    #[test]
+    fn wallet_validation() {
+        assert!(super::is_valid_wallet("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"));
+        assert!(super::is_valid_wallet("0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"));
+        assert!(!super::is_valid_wallet("0xabc"));
+        assert!(!super::is_valid_wallet("0xzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"));
+    }
+
+    #[test]
+    fn constant_time_eq_works() {
+        assert!(super::constant_time_eq("secret", "secret"));
+        assert!(!super::constant_time_eq("secret", "Secret"));
+        assert!(!super::constant_time_eq("a", "ab"));
+    }
+
+    #[test]
+    fn wallet_username_blocklist() {
+        std::env::set_var("WALLET_BLOCKLIST", "0x0000000000000000000000000000000000000000,0xdeadbeef000000000000000000000000000000");
+        std::env::set_var("USERNAME_BLOCKLIST", "admin,root,system");
+        assert!(super::is_wallet_blocked("0x0000000000000000000000000000000000000000"));
+        assert!(!super::is_wallet_blocked("0x1111111111111111111111111111111111111111"));
+        assert!(super::is_username_blocked("Admin")); // case-insensitive
+        assert!(!super::is_username_blocked("normaluser"));
+    }
+
+    #[test]
+    fn webhook_token_validation() {
+        // Prefer specific token over generic
+        std::env::set_var("WEBHOOK_TOKEN", "generic");
+        std::env::set_var("TELEGRAM_WEBHOOK_TOKEN", "specific");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-webhook-token", http::HeaderValue::from_static("specific"));
+        assert!(super::webhook_token_valid(&headers, None, "TELEGRAM_WEBHOOK_TOKEN"));
+
+        // Query param path
+        let headers2 = HeaderMap::new();
+        let mut q = std::collections::HashMap::new();
+        q.insert("token".to_string(), "generic".to_string());
+        // If no specific env, falls back to generic
+        std::env::remove_var("TELEGRAM_WEBHOOK_TOKEN");
+        assert!(super::webhook_token_valid(&headers2, Some(&q), "TELEGRAM_WEBHOOK_TOKEN"));
+
+        // Deny when no env configured
+        std::env::remove_var("WEBHOOK_TOKEN");
+        assert!(!super::webhook_token_valid(&headers2, Some(&q), "TELEGRAM_WEBHOOK_TOKEN"));
+    }
 }

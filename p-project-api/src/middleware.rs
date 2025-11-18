@@ -14,6 +14,7 @@ use std::env;
 use std::time::Duration;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
+use axum::http::HeaderMap;
 
 pub fn init_middleware() {
     println!("Middleware initialized");
@@ -133,6 +134,75 @@ pub async fn require_jwt(mut req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
+// Add common security headers to all responses
+pub async fn security_headers(mut req: Request, next: Next) -> Response {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(
+        HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        HeaderName::from_static("referrer-policy"),
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static(
+            "geolocation=(), microphone=(), camera=(), payment=()",
+        ),
+    );
+    headers.insert(
+        HeaderName::from_static("strict-transport-security"),
+        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
+    // Basic default CSP safe for APIs (disallows inline/script eval by default)
+    headers.insert(
+        HeaderName::from_static("content-security-policy"),
+        HeaderValue::from_static("default-src 'none'"),
+    );
+    res
+}
+
+// Admin IP allowlist middleware (checks X-Forwarded-For first)
+pub async fn require_admin_ip(req: Request, next: Next) -> Response {
+    let allowlist = std::env::var("ADMIN_IP_ALLOWLIST")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    // If no allowlist configured, allow all (opt-in)
+    if allowlist.is_empty() {
+        return next.run(req).await;
+    }
+
+    let ip = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or("").trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| req.extensions().get::<std::net::SocketAddr>().map(|sa| sa.ip().to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if allowlist.iter().any(|a| a == &ip) {
+        next.run(req).await
+    } else {
+        let body = serde_json::json!({"error": "forbidden_ip"}).to_string();
+        Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    }
+}
+
 // Per-IP rate limit using AppState's limiter (skips OPTIONS)
 pub async fn require_rate_limit(req: Request, next: Next) -> Response {
     use axum::http::Method;
@@ -157,6 +227,8 @@ pub async fn require_rate_limit(req: Request, next: Next) -> Response {
                 | "/web2/create-donation-widget"
                 | "/web2/create-youtube-tip-config"
                 | "/web2/register-messaging-bot"
+                | "/web2/telegram/webhook"
+                | "/web2/discord/webhook"
         );
 
     if let Some(state) = req.extensions().get::<crate::shared::AppState>() {

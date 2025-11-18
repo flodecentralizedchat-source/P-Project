@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: relayer
-          image: ghcr.io/example/p-project-bridge-relayer:latest
+          image: ghcr.io/your-ghcr-namespace/p-project-bridge-relayer:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: DATABASE_URL
