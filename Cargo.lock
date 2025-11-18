@@ -4471,7 +4471,7 @@ dependencies = [
  "arbitrary",
  "ark-bls12-381",
  "ark-ec 0.4.2",
- "ark-ff 0.4.2",
+ "ark-ff 0.5.0",
  "ark-poly 0.4.2",
  "ark-poly-commit",
  "ark-serialize 0.4.2",
