@@ -91,6 +91,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Contracts tests
+  contracts-tests:
+    build:
+      context: .
+      dockerfile: p-project-contracts/Dockerfile
+    image: p_project_contracts_tests:latest
+    container_name: p_project_contracts_tests
+    pull_policy: build
+    volumes:
+      - .:/app
+    command: ["cargo", "test", "-p", "p-project-contracts"]
+
   # Nginx static server for WASM pkg (with Brotli)
   nginx:
     build:

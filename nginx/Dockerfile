@@ -24,25 +24,19 @@ RUN wasm-pack build p-project-web --target web --out-dir pkg --release
 COPY nginx/index.html p-project-web/pkg/index.html
 COPY nginx/app.js p-project-web/pkg/app.js
 
-# Optimize WASM and precompress built assets (gzip + brotli)
+# Precompress built assets (gzip only, since we're using standard nginx)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      brotli \
-      binaryen \
+      gzip \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
     cd /app/p-project-web/pkg; \
-    if [ -f p_project_web_bg.wasm ]; then \
-      wasm-opt -Oz -o p_project_web_bg.opt.wasm p_project_web_bg.wasm && mv -f p_project_web_bg.opt.wasm p_project_web_bg.wasm; \
-    fi; \
     find . -type f -regextype posix-extended -regex '.*\.(js|mjs|css|html|svg|json|wasm|xml|txt|webmanifest)$' \
-      -exec gzip -9 -k {} \; \
-      -exec brotli -Z -k {} \;
+      -exec gzip -9 -k {} \;
 
-# ---- Runtime: NGINX with brotli module ----
-# This base includes the ngx_brotli dynamic module
-FROM fholzer/nginx-brotli:alpine AS web
+# ---- Runtime: Standard NGINX ----
+FROM nginx:alpine AS web
 
-# NGINX configuration (expects brotli_static/gzip_static on)
+# NGINX configuration
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Static site + precompressed files

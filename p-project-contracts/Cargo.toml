@@ -15,8 +15,6 @@ hex = "0.4"
 serde_json = "1.0"
 kani-verifier = { version = "0.63", optional = true }
 rust_decimal = "1.36"
-# Post-quantum cryptography
-kyberlib = "0.0.6"
 # Zero-knowledge proofs
 ark-ec = "0.4.2"
 ark-ff = "0.4.2"
@@ -26,7 +24,12 @@ ark-serialize = "0.4.2"
 ark-std = "0.5.0-alpha.0"
 ark-bls12-381 = "0.5.0"
 # Threshold signatures
-multi-party-ecdsa = "0.8.1"
+multi-party-ecdsa = { version = "0.8.1", optional = true }
+
+[features]
+default = []
+advanced-cryptography = ["multi-party-ecdsa"]
+verification = ["kani-verifier"]
 
 [dev-dependencies]
 # Benchmarking
@@ -34,12 +37,6 @@ criterion = "0.5"
 # Fuzzing
 arbitrary = "1.3"
 proptest = "1.4"
-# Security auditing
-cargo-audit = "0.17"
-
-[features]
-default = []
-verification = ["kani-verifier"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "mysql", "chrono", "uuid", "rust_decimal"] }

@@ -5,16 +5,20 @@ require("dotenv").config();
 // This is a sample Hardhat network config. Replace with your own network details.
 module.exports = {
   solidity: {
-    version: "0.8.20",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200
+    compilers: [
+      {
+        version: "0.8.20",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          }
+        }
       }
-    }
+    ]
   },
   paths: {
-    sources: "./",
+    sources: "./contracts", // Source files in the contracts directory
     tests: "./test",
     cache: "./cache",
     artifacts: "./artifacts"

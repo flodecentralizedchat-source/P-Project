@@ -13,15 +13,15 @@ describe("PProjectToken Auto-Liquidity", function () {
     beforeEach(async function () {
         [owner, addr1, addr2, ...addrs] = await ethers.getSigners();
         
-        // Deploy mock Uniswap V2 Router
-        const MockUniswapV2Router = await ethers.getContractFactory("MockUniswapV2Router");
-        mockRouter = await MockUniswapV2Router.deploy();
-        await mockRouter.deployed();
-        
-        // Deploy mock Uniswap V2 Pair
+        // Deploy mock Uniswap V2 Pair first
         const MockUniswapV2Pair = await ethers.getContractFactory("MockUniswapV2Pair");
         mockPair = await MockUniswapV2Pair.deploy();
         await mockPair.deployed();
+        
+        // Deploy mock Uniswap V2 Router with the mock pair address
+        const MockUniswapV2Router = await ethers.getContractFactory("MockUniswapV2Router");
+        mockRouter = await MockUniswapV2Router.deploy(mockPair.address);
+        await mockRouter.deployed();
         
         const PProjectToken = await ethers.getContractFactory("PProjectToken");
         const totalSupply = ethers.utils.parseEther("350000000"); // 350 million tokens
@@ -31,11 +31,19 @@ describe("PProjectToken Auto-Liquidity", function () {
         token = await PProjectToken.deploy(totalSupply, burnRate, rewardRate);
         await token.deployed();
         
-        // Set the Uniswap router
+        // Disable bot protection for testing
+        await token.setBotProtection(false);
+        
+        // Set the Uniswap router and pair
         await token.setUniswapRouter(mockRouter.address);
+        await token.setUniswapPair(mockPair.address);
         
         // Enable trading
         await token.setTradingEnabled(true);
+        
+        // Wait for bot protection cooldown
+        await network.provider.send("evm_increaseTime", [3600]); // 1 hour
+        await network.provider.send("evm_mine");
     });
 
     describe("Auto-Liquidity Settings", function () {
@@ -85,7 +93,7 @@ describe("PProjectToken Auto-Liquidity", function () {
 
     describe("Auto-Liquidity Functionality", function () {
         it("Should collect liquidity fees on transfer when trading is enabled", async function () {
-            // Transfer tokens to addr1
+            // Transfer tokens to addr1 (this should work since owner has enough tokens)
             const transferAmount = ethers.utils.parseEther("10000");
             await token.transfer(addr1.address, transferAmount);
             
@@ -93,7 +101,7 @@ describe("PProjectToken Auto-Liquidity", function () {
             const initialContractBalance = await token.balanceOf(token.address);
             
             // Transfer tokens from addr1 to addr2 (this should trigger fees)
-            await token.connect(addr1).transfer(addr2.address, transferAmount);
+            await token.connect(addr1).transfer(addr2.address, transferAmount.div(2));
             
             // Check that fees were collected by the contract
             const finalContractBalance = await token.balanceOf(token.address);

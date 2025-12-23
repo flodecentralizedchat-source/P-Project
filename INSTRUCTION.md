@@ -22,7 +22,7 @@ These steps cover the minimum environment, sequence, and commands to start the c
    ```bash
    cargo run -p p-project-api
    ```
-2. This boots the Axum-based API on `http://localhost:3001`. It automatically calls `MySqlDatabase::init_tables()` so the schema (users, airdrops, `bridge_txs`, etc.) exists.
+2. This boots the Axum-based API on `http://localhost:3000`. It automatically calls `MySqlDatabase::init_tables()` so the schema (users, airdrops, `bridge_txs`, etc.) exists.
 
 ## 3. Start the bridge relayer
 1. In another shell, run:
@@ -31,7 +31,7 @@ These steps cover the minimum environment, sequence, and commands to start the c
    ```
 2. Or use the helper script (`scripts/run-services.ps1`) to launch both the API and relayer together from separate PowerShell windows:
    ```powershell
-   .\\scripts\\run-services.ps1
+   .\scripts\run-services.ps1
    ```
    The script powers up `p-project-api` and `p-project-bridge --bin relayer_demo` concurrently, so you can keep both services running side-by-side. Pass `-NoApi` or `-NoRelayer` to skip one process when needed.
 3. The relayer polls `bridge_txs`, waits for Ethereum confirmations (via `ETH_RPC_URL`), and calls destination adapters to mint tokens. Logs show when locks are read and when a mint is performed (`[Relayer] ...`).
@@ -57,4 +57,40 @@ It runs the `BridgeService` with `MockStore` and `MockAdapter`s, triggers a `bri
 
 Keep the database and bridge relayer shells running as you iterate. Restart either process if you change env vars or redeploy contracts.
 
-- **Clean rebuild**: if you want a warning-free cache (e.g., after you clean up unused warnings), run `cargo clean` then `cargo check -p p-project-airdrop` (or the crate you’re working on) before running the services so the diagnostics reflect the latest source.
+**Clean rebuild**: if you want a warning-free cache (e.g., after you clean up unused warnings), run `cargo clean` then `cargo check -p p-project-airdrop` (or the crate you're working on) before running the services so the diagnostics reflect the latest source.
+
+## Recommended Approach to Run P-Project
+
+1. First, ensure no Cargo processes are running:
+   ```powershell
+   Get-Process | Where-Object {$_.Name -like "*cargo*"} | Stop-Process -Force
+   ```
+
+2. Start the database services:
+   ```bash
+   cd d:\p-project
+   docker compose up -d mysql redis mongodb
+   ```
+
+3. Wait for the databases to be fully initialized (check with `docker compose ps`)
+
+4. Create the required database:
+   ```bash
+   docker compose exec mysql mysql -uroot -prootpassword -e "CREATE DATABASE IF NOT EXISTS p_project;"
+   ```
+
+5. Set the environment variables and run the API:
+   ```powershell
+   cd d:\p-project
+   $env:DATABASE_URL="mysql://root:rootpassword@localhost:3306/p_project"
+   $env:JWT_SECRET="change_me_jwt_secret"
+   cargo run -p p-project-api --bin p-project-api
+   ```
+
+6. In a separate terminal, start the web service:
+   ```bash
+   cd d:\p-project
+   docker compose up -d nginx
+   ```
+
+This approach should allow you to run the P-Project with all its services working together. The API will be available at http://localhost:3000 and the web interface at http://localhost:8080.

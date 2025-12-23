@@ -27,6 +27,9 @@ describe("Treasury", function () {
         const Treasury = await ethers.getContractFactory("Treasury");
         treasury = await Treasury.deploy(token.address, signers, required);
         await treasury.deployed();
+        
+        // Transfer token ownership to treasury for burn functionality
+        await token.transferOwnership(treasury.address);
     });
 
     describe("Deployment", function () {
@@ -111,7 +114,9 @@ describe("Treasury", function () {
         });
 
         it("Should add and execute scheduled buyback", async function () {
-            const futureTimestamp = Math.floor(Date.now() / 1000) + 3600; // 1 hour in the future
+            // Get current block timestamp and add 3600 seconds (1 hour) to it
+            const currentBlock = await ethers.provider.getBlock('latest');
+            const futureTimestamp = currentBlock.timestamp + 3600; // 1 hour in the future
             const amount = ethers.utils.parseEther("1000");
             const targetPrice = ethers.utils.parseEther("0.05"); // 0.05 USDT per token
             
@@ -122,7 +127,9 @@ describe("Treasury", function () {
             await treasury.setAutoBuybackEnabled(true);
             
             // Execute scheduled buybacks (should not execute yet since timestamp is in future)
-            const tokensBought = await treasury.executeScheduledBuybacks(targetPrice);
+            // Use callStatic to get the return value without actually executing the transaction
+            const tokensBought = await treasury.callStatic.executeScheduledBuybacks(targetPrice);
+            
             expect(tokensBought).to.equal(0);
         });
     });
@@ -163,7 +170,15 @@ describe("Treasury", function () {
             await treasury.addBuybackTrigger("Price Drop", "price_drop", threshold, triggerAmount);
             
             // Check triggers with a price that meets the condition (0.1 < 0.15)
-            const tokensBought = await treasury.checkBuybackTriggers(ethers.utils.parseEther("0.1"), "price_drop", 0);
+            const tx = await treasury.checkBuybackTriggers(ethers.utils.parseEther("0.1"), "price_drop", 0);
+            const receipt = await tx.wait();
+            
+            // Check that the trigger was executed by looking at the event
+            const event = receipt.events.find(event => event.event === "TriggerBuybackExecuted");
+            expect(event).to.not.be.undefined;
+            
+            // Get tokensBought from the event
+            const tokensBought = event.args.tokensBought;
             
             // Since the condition is met, some tokens should be bought
             expect(tokensBought).to.be.above(0);
